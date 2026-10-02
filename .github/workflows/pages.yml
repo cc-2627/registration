@@ -1,0 +1,106 @@
+# Publishes web/ to GitHub Pages. In bedel itself (the template) that's the
+# landing page and the setup page. In a course, it's the course's own page,
+# web/manage.html, for running the course from the browser.
+#
+# A course publishes only once Pages is on with "GitHub Actions" as its source,
+# which the setup page does; until then this does nothing.
+#
+# A course's page also carries data.json, its public data (scripts/site_data.py),
+# so students' visits don't each ask GitHub's API. It's refreshed when the course
+# or an assignment changes, and after registrations and releases - then only
+# republished if it actually changed, since registrations run every half hour.
+name: Setup page
+
+on:
+  push:
+    branches: [main]
+    paths: ["web/**", ".github/workflows/pages.yml", "course.json", "assignments/**",
+            "scripts/site_data.py"]
+  workflow_run:
+    # Not "Course files": that one runs after this, and the two would take turns forever.
+    workflows: ["Group registration", "Release an assignment"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      on: ${{ steps.pages.outputs.on }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Is Pages on, published by this workflow, with something new?
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          # gh prints GitHub's error on stdout, so a repo without Pages is caught by the exit code.
+          url=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq 'select(.build_type == "workflow") | .html_url' 2>/dev/null) || url=""
+          if [ -z "$url" ]; then
+            echo "Pages isn't on with GitHub Actions as its source, so there's nothing to publish."
+            exit 0
+          fi
+          if [ "$EVENT" = workflow_run ]; then
+            # After a registration or a release only the data can have changed.
+            if [ ! -f course.json ]; then exit 0; fi
+            python scripts/site_data.py "$RUNNER_TEMP/data.json"
+            live=$(curl -fsS "${url%/}/data.json" 2>/dev/null || true)
+            if [ "$live" = "$(cat "$RUNNER_TEMP/data.json")" ]; then
+              echo "The published data is up to date."
+              exit 0
+            fi
+          fi
+          echo "on=true" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: check
+    if: needs.check.outputs.on == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the site
+        env:
+          IS_TEMPLATE: ${{ github.event.repository.is_template }}
+        run: |
+          mkdir _site
+          cp -R web/. _site/
+          if [ "$IS_TEMPLATE" != true ]; then
+            # A course: its page is the front page, and it has no use for setting up.
+            mv _site/manage.html _site/index.html
+            rm _site/setup.html
+          fi
+          printf '{"repo": "%s", "template": %s}\n' "$GITHUB_REPOSITORY" "${IS_TEMPLATE:-false}" > _site/site.json
+      - uses: actions/setup-python@v5
+        if: hashFiles('course.json') != ''
+        with:
+          python-version: "3.12"
+      - name: The course's public data
+        if: hashFiles('course.json') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: python scripts/site_data.py _site/data.json
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4

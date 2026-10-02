@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- This page may load files from its own site and talk to api.github.com, and
+     nothing else: your browser enforces that, whatever the scripts try. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://api.github.com; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Course — bedel</title>
+<meta name="description" content="Run a course set up with bedel: registrations, assignments, deadlines, roster.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233f5bd9'/%3E%3Ccircle cx='12' cy='16' r='5' fill='none' stroke='white' stroke-width='3'/%3E%3Cpath d='M17 16h10M23 16v4M27 16v3' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <a class="brand" href="./">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="var(--accent)"/><circle cx="12" cy="16" r="5" fill="none" stroke="var(--accent-ink)" stroke-width="3"/><path d="M17 16h10M23 16v4M27 16v3" stroke="var(--accent-ink)" stroke-width="3" stroke-linecap="round"/></svg>
+      bedel
+    </a>
+    <div class="links">
+      <a href="#changes" class="teacher-only">Make changes</a>
+      <a data-template="" href="https://github.com/ajccosta/bedel">GitHub</a>
+      <button class="theme" id="themeBtn" type="button" aria-label="Switch colour theme">◐</button>
+    </div>
+  </nav>
+</div>
+
+<main class="wrap">
+  <section class="pick" id="pick" hidden>
+    <h1 class="page-title">Open a course</h1>
+    <p class="sub">This page runs a course set up with bedel. Each course publishes its own copy at
+      <code>https://ORG.github.io/registration/</code>; this one can open any course.</p>
+    <div class="row">
+      <label>Course repository <input id="pickRepo" class="wide" placeholder="my-course-2026/registration" autocomplete="off" spellcheck="false"></label>
+      <button class="btn primary" id="pickGo" type="button">Open</button>
+    </div>
+  </section>
+
+  <div id="course" hidden>
+    <header class="course-head">
+      <h1 class="page-title" id="courseName">…</h1>
+      <p class="sub" id="courseMeta"></p>
+      <p class="role-line" id="roleLine" hidden>You're viewing this as a <strong id="roleName"></strong>.
+        <button class="linkish" id="switchRole" type="button">Switch</button></p>
+      <div class="row teacher-only">
+        <input id="studentLink" class="wide mono" readonly aria-label="The link for students">
+        <button class="btn small" id="copyLink" type="button">Copy the students' link</button>
+      </div>
+      <nav class="views" aria-label="Pages" id="views" hidden>
+        <a href="#" data-view="overview">Overview</a>
+        <a href="#assignments" data-view="assignments">Assignments</a>
+        <a href="#mine" data-view="mine" class="student-only">My group</a>
+      </nav>
+    </header>
+
+    <section class="who" id="who" hidden>
+      <h2>Are you a student or a teacher?</h2>
+      <div class="who-choices">
+        <button class="choice" type="button" data-role="student"><strong>Student</strong>
+          <span>Register your group, see the assignments and deadlines, and how your group's repositories are doing.</span></button>
+        <button class="choice" type="button" data-role="teacher"><strong>Teacher</strong>
+          <span>Everything about the course: release assignments, change deadlines, the roster and the bot.</span></button>
+      </div>
+    </section>
+
+    <div id="roleContent" hidden>
+
+    <div data-view-panel="overview">
+    <section>
+      <h2>Now</h2>
+      <p class="student-only"><a class="btn primary" id="registerBtn">Register your group</a></p>
+      <div class="stats" id="stats"></div>
+      <ul class="health teacher-only" id="health"></ul>
+      <p class="hint teacher-only">Students can see their own group's repositories under <em>My group</em>, with a read-only key.
+        For those keys to work without you approving each one, choose <em>Do not require administrator approval</em> in
+        <a id="patPolicy" target="_blank" rel="noopener">the organization's token settings ↗</a>, once.</p>
+      <div class="status" id="overviewStatus"></div>
+    </section>
+
+    <section>
+      <h2>Assignments</h2>
+      <div class="table-scroll">
+        <table class="compare plain" id="assignmentTable">
+          <thead><tr><th>Assignment</th><th>Soft deadline</th><th>Hard deadline</th><th>Now</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="hint" id="noAssignments" hidden>No assignments yet.</p>
+      <p><a href="#assignments">Manage assignments →</a></p>
+    </section>
+    </div>
+
+    <div data-view-panel="assignments" hidden>
+    <section>
+      <h2>Assignments</h2>
+      <p class="sub teacher-only" id="asgSignedOut">Sign in below to change deadlines, see each group's repository, or release an assignment.</p>
+      <div class="asg-list" id="asgList"></div>
+      <p class="hint" id="asgNone" hidden>No assignments yet.</p>
+    </section>
+
+    <section id="releaseSection" hidden>
+      <h2>Release an assignment</h2>
+      <div class="step">
+        <p>Every registered group gets its own private repository, and an issue telling them about it.</p>
+        <div class="row">
+          <label>Name <input id="aName" placeholder="a1" autocomplete="off" spellcheck="false"></label>
+        </div>
+        <div class="row">
+          <label class="check"><input id="aOwn" type="checkbox"> Groups bring their own work</label>
+        </div>
+        <p class="hint" id="aOwnHint" hidden>Each group gets an empty repository. The issue announcing it shows them
+          the commands that push in the work they already have, history and all. Groups that haven't started just clone it.</p>
+        <div class="row" id="aStart">
+          <label>Starting files: a folder <input id="aFolder" type="file" webkitdirectory multiple></label>
+          <label>…or an existing repository <input id="aTemplate" placeholder="a1-template" autocomplete="off" spellcheck="false"></label>
+        </div>
+        <div class="status" id="folderStatus"></div>
+        <div class="row">
+          <label>Soft deadline
+            <select id="aSoftMode">
+              <option value="week">By class: a week after each class's session in…</option>
+              <option value="date">One date for everyone</option>
+              <option value="none">None</option>
+            </select>
+          </label>
+          <label id="aSoftWeekWrap">Week of <input id="aSoftWeek" type="date"></label>
+          <label id="aSoftDateWrap" hidden>Soft deadline <input id="aSoft" type="datetime-local"></label>
+        </div>
+        <div class="row">
+          <label>Hard deadline (repos lock) <input id="aHard" type="datetime-local"></label>
+          <label class="check"><input id="aNoHard" type="checkbox"> Never lock</label>
+        </div>
+        <div class="row">
+          <label id="aCarryLabel">Continue from an earlier assignment <select id="aCarry"><option value="">No — start from the files only</option></select>
+            <span class="hint">Each group's new repository starts as a copy of their repository for that assignment, history and all, with your starting files added on top.</span></label>
+          <label class="check"><input id="aDry" type="checkbox"> Dry run (only show what would happen)</label>
+        </div>
+        <button class="btn primary" id="runRelease" type="button">Release</button>
+        <ol class="log" id="releaseLog"></ol>
+      </div>
+
+    </section>
+    </div>
+
+    <div data-view-panel="mine" hidden>
+    <section>
+      <h2>Your group</h2>
+      <p class="sub">How your group's repositories are doing: commits, who made them, and where you stand against your
+        deadlines. Your repositories are private, so this needs a key from you.</p>
+      <div id="mineSignin">
+        <div class="tokenbox">
+          <h3>About this key</h3>
+          <ul>
+            <li><strong>It can only read.</strong> It's made read-only, so nothing can be changed with it.</li>
+            <li><strong>It sees only what you can see.</strong> GitHub gives it your own access in <span class="orgname"></span>,
+              no more: your group's repositories, not anyone else's, and nothing outside <span class="orgname"></span>.</li>
+            <li><strong>It goes only to GitHub.</strong> It stays in this tab's memory and is sent only to <code>api.github.com</code>;
+              closing the tab forgets it. It expires in 30 days, or delete it on GitHub any time.</li>
+          </ul>
+        </div>
+        <ol class="howto">
+          <li>Accept the invitation to <span class="orgname"></span> first, if you haven't: GitHub emailed it when your group was registered.</li>
+          <li><a class="btn small" id="studentTokenLink" target="_blank" rel="noopener">Open GitHub's token page, filled in ↗</a></li>
+          <li>Check that <strong>Resource owner</strong> says <strong class="orgname"></strong>, choose <strong>All repositories</strong>, generate it and copy it.</li>
+        </ol>
+        <div class="row">
+          <label>Key <input id="studentToken" class="wide" type="password" placeholder="github_pat_…" autocomplete="off" spellcheck="false"></label>
+          <button class="btn primary" id="checkStudent" type="button">Show my group</button>
+        </div>
+        <div class="status" id="studentStatus"></div>
+      </div>
+      <div id="mineOut"></div>
+    </section>
+    </div>
+
+    <section id="changes" class="teacher-only">
+      <h2>Make changes</h2>
+      <p class="sub">Everything above is public, read without a token. Changing the course takes a token from an owner of
+        <span class="orgname"></span>, made for this course alone.</p>
+
+      <div id="signin">
+        <div class="tokenbox">
+          <h3>How this token works</h3>
+          <ul>
+            <li><strong>It reaches <span class="orgname"></span> and nothing else.</strong> It's a fine-grained token made for
+              <span class="orgname"></span>. Classic tokens are refused, and the page proves the token belongs to <span class="orgname"></span> before using it.</li>
+            <li><strong>It goes only to GitHub.</strong> It stays in this tab's memory and is sent only to <code>api.github.com</code>.
+              The page's Content-Security-Policy stops your browser from letting it connect anywhere else. Closing the tab forgets it.</li>
+            <li><strong>This page is your course's own copy.</strong> It's published from <span class="reponame"></span>'s <code>web/</code> folder,
+              and changes only when you pull bedel's updates.</li>
+            <li><strong>Make it last as long as you need it.</strong> A week is plenty for a round of changes. Make another next time.</li>
+          </ul>
+        </div>
+        <ol class="howto">
+          <li><label class="inline">It should last <input id="courseDays" type="number" min="1" max="366" value="7"> days</label></li>
+          <li><a class="btn small" id="courseTokenLink" target="_blank" rel="noopener">Open GitHub's token page, filled in ↗</a></li>
+          <li>Check that <strong>Resource owner</strong> says <strong class="orgname"></strong>, choose <strong>All repositories</strong>, generate it and copy it.</li>
+        </ol>
+        <div class="row">
+          <label>Token <input id="courseToken" class="wide" type="password" placeholder="github_pat_…" autocomplete="off" spellcheck="false"></label>
+          <button class="btn" id="checkCourse" type="button">Check it</button>
+        </div>
+        <ul class="checks" id="courseChecks"></ul>
+        <div class="status" id="courseTokenStatus"></div>
+        <details>
+          <summary>Every permission it asks for, and why</summary>
+          <table class="perms">
+            <tr><td>Administration</td><td>Create the repository with an assignment's starting files</td></tr>
+            <tr><td>Contents</td><td>Push the starting files, and change <code>course.json</code></td></tr>
+            <tr><td>Secrets</td><td>Replace the roster, class listings and the bot's token, sealed</td></tr>
+            <tr><td>Actions, Workflows</td><td>Run the workflows that release assignments and write the students' form; starting files may contain workflows</td></tr>
+            <tr><td>Members (read only)</td><td>Check that you own the organization</td></tr>
+          </table>
+        </details>
+      </div>
+
+      <div id="tools" hidden>
+        <div class="tabs" role="tablist">
+          <button type="button" role="tab" data-tab="settings" aria-selected="true">Course settings</button>
+          <button type="button" role="tab" data-tab="studentsTab">Students</button>
+          <button type="button" role="tab" data-tab="bot">The bot's token</button>
+        </div>
+
+        <div class="step" data-panel="settings">
+          <p>Saving rewrites <code>course.json</code>, and a workflow regenerates the students' page and form from it.</p>
+          <div class="row">
+            <label>Course name <input id="cName" class="wide"></label>
+          </div>
+          <div class="row">
+            <label>Smallest group <input id="cMin" type="number" min="1" max="6" value="2"></label>
+            <label>Largest group <input id="cMax" type="number" min="1" max="6" value="2"></label>
+            <label>Time zone <select id="cTz"></select></label>
+          </div>
+          <div class="row">
+            <label>What students call their number (optional) <input id="cHint" class="wide" placeholder="your student number"></label>
+          </div>
+          <table class="classes">
+            <thead><tr><th>Class</th><th>Day</th><th>Session ends</th><th>Note (optional)</th><th></th></tr></thead>
+            <tbody id="classRows"></tbody>
+          </table>
+          <button class="btn small" id="addClass" type="button">+ Add a class</button>
+          <div class="row"><button class="btn primary" id="saveCourse" type="button">Save the course</button></div>
+          <ol class="log" id="courseLog"></ol>
+        </div>
+
+        <div class="step" data-panel="studentsTab" hidden>
+          <p class="callout"><strong>These files don't leave your computer.</strong> Only the student numbers (and classes) found in them are sent, sealed.
+            A new roster replaces the stored one. Leave it empty to keep the stored one and change only the test students.</p>
+          <div class="row">
+            <label>Roster <input id="roster" type="file" accept=".csv,.tsv,.txt,text/*"></label>
+            <label id="colWrap" hidden>Student-number column <select id="rosterCol"></select></label>
+          </div>
+          <div class="status" id="rosterStatus"></div>
+          <div class="row">
+            <label>Class listings <input id="listings" type="file" multiple></label>
+          </div>
+          <div class="status" id="listingStatus"></div>
+          <div class="row">
+            <label>Test students <input id="testN" type="number" min="0" max="20" value="0"></label>
+            <span class="hint">99901, 99902, … for registering test groups. 0 removes them, which needs the roster file again.</span>
+          </div>
+          <div class="row"><button class="btn primary" id="saveStudents" type="button">Store the students</button></div>
+          <ol class="log" id="studentsLog"></ol>
+        </div>
+
+        <div class="step" data-panel="bot" hidden>
+          <p>Replace the bot's token when it's about to run out, or if the bot's runs above fail. It's checked, then sealed and stored, as at setup.</p>
+          <ol class="howto">
+            <li><label class="inline">It should last <input id="botDays" type="number" min="1" max="366" value="180"> days</label></li>
+            <li><a class="btn small" id="botTokenLink" target="_blank" rel="noopener">Open GitHub's token page, filled in ↗</a></li>
+            <li>Check that <strong>Resource owner</strong> says <strong class="orgname"></strong>, choose <strong>All repositories</strong>, generate it and copy it.</li>
+          </ol>
+          <div class="row">
+            <label>New bot token <input id="botToken" class="wide" type="password" placeholder="github_pat_…" autocomplete="off" spellcheck="false"></label>
+          </div>
+          <div class="row"><button class="btn primary" id="saveBot" type="button">Check and store it</button></div>
+          <ol class="log" id="botLog"></ol>
+        </div>
+      </div>
+    </section>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>bedel is free: read it, change it, run it. <a data-template="" data-label href="https://github.com/ajccosta/bedel">github.com/ajccosta/bedel</a> ·
+      <a data-template="/blob/main/scripts/README.md" href="https://github.com/ajccosta/bedel/blob/main/scripts/README.md">Staff guide</a> ·
+      <a data-template="/tree/main/web" href="https://github.com/ajccosta/bedel/tree/main/web">This page's code</a></p>
+    <p><em>Bedel</em> is Portuguese for the university porter who keeps the rooms and the timetable: he lets you in, and locks the door when time is up.</p>
+    <p class="credit">
+      <a href="https://www.anthropic.com/claude">Written by Claude Opus 5.5</a>
+      <a class="anthropic" href="https://www.anthropic.com" aria-label="Anthropic"><span aria-hidden="true"></span></a>
+    </p>
+  </div>
+</footer>
+
+<script type="module" src="js/manage.js"></script>
+</body>
+</html>

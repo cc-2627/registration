@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- This page may load files from its own site and talk to api.github.com, and
+     nothing else: your browser enforces that, whatever the scripts try. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://api.github.com; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Set up a course — bedel</title>
+<meta name="description" content="Set up a course with bedel, step by step: organization, tokens, course, students.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233f5bd9'/%3E%3Ccircle cx='12' cy='16' r='5' fill='none' stroke='white' stroke-width='3'/%3E%3Cpath d='M17 16h10M23 16v4M27 16v3' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <a class="brand" href="./">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="var(--accent)"/><circle cx="12" cy="16" r="5" fill="none" stroke="var(--accent-ink)" stroke-width="3"/><path d="M17 16h10M23 16v4M27 16v3" stroke="var(--accent-ink)" stroke-width="3" stroke-linecap="round"/></svg>
+      bedel
+    </a>
+    <div class="links">
+      <a href="./">About bedel</a>
+      <a data-template="" href="https://github.com/ajccosta/bedel">GitHub</a>
+      <button class="theme" id="themeBtn" type="button" aria-label="Switch colour theme">◐</button>
+    </div>
+  </nav>
+</div>
+
+<main class="wrap wizard">
+  <h1 class="page-title">Set up a course</h1>
+  <ol class="progress" id="progress" aria-label="Setup steps">
+    <li><button type="button" data-go="1">Organization</button></li>
+    <li><button type="button" data-go="2">Setup token</button></li>
+    <li><button type="button" data-go="3">Course</button></li>
+    <li><button type="button" data-go="4">Students</button></li>
+    <li><button type="button" data-go="5">Bot token</button></li>
+    <li><button type="button" data-go="6">Set up</button></li>
+  </ol>
+
+  <!-- 1 -->
+  <section class="wstep" data-step="1">
+    <h2>Your course's organization</h2>
+    <p>Each course edition gets its own GitHub organization. Its students' teams and repositories live there,
+      apart from everything else you have on GitHub. A free organization is enough.</p>
+    <p class="callout"><strong>Create it before anything else.</strong> The tokens in the next steps are made for this
+      organization alone, and GitHub can only tie a token to an organization that already exists.</p>
+    <div class="row">
+      <label>Its name <input id="org" class="wide" placeholder="my-course-2026" autocomplete="off" spellcheck="false"></label>
+      <a class="btn" href="https://github.com/account/organizations/new?plan=free" target="_blank" rel="noopener">Create it on GitHub ↗</a>
+    </div>
+    <p class="hint">Use exactly this name when you create it. Already have one for this course? Just enter its name.
+      The next step checks it exists, and that you own it.</p>
+    <div class="status" id="orgStatus"></div>
+    <details>
+      <summary>The course repository's name</summary>
+      <div class="row">
+        <label>Repository <input id="repo" value="registration" autocomplete="off" spellcheck="false"></label>
+      </div>
+      <p>Students open their registration form in this repository. Keep the default unless you have a reason.</p>
+    </details>
+  </section>
+
+  <!-- 2 -->
+  <section class="wstep" data-step="2" hidden>
+    <h2>A token for setting up</h2>
+    <p>A website can't make tokens or act on GitHub for you without one. So you make this one yourself on GitHub, with
+      everything filled in, and paste it here. It's for setting up only.</p>
+
+    <div class="tokenbox">
+      <h3>How this token works</h3>
+      <ul>
+        <li><strong>It reaches <span class="orgname"></span> and nothing else.</strong> It's a fine-grained token whose resource owner is
+          <span class="orgname"></span>. GitHub fixes that one owner when the token is made. It can't touch your own repositories, or any other organization.</li>
+        <li><strong>The page checks before using it.</strong> Classic tokens are refused, because they reach everything you can.
+          The page then proves the token belongs to <span class="orgname"></span>, with a request GitHub refuses without changing anything.</li>
+        <li><strong>It goes only to GitHub.</strong> It stays in this tab's memory and is sent only to <code>api.github.com</code>.
+          Nothing is saved, so closing the tab forgets it. There's no bedel server. The page's Content-Security-Policy
+          (in its source) stops your browser from letting it connect anywhere else.</li>
+        <li><strong>It lasts 7 days,</strong> and you can delete it the moment setup is done.</li>
+      </ul>
+      <p class="aside">Rather not paste a token into a web page? Clone bedel and run <code>./scripts/setup.sh</code>. It does the same with your <code>gh</code> login.</p>
+    </div>
+
+    <h3 class="minor">Make it</h3>
+    <ol class="howto">
+      <li><a class="btn small" id="setupTokenLink" target="_blank" rel="noopener">Open GitHub's token page, filled in ↗</a></li>
+      <li>Check that <strong>Resource owner</strong> says <strong class="orgname"></strong>. If it shows your username instead, choose <span class="orgname"></span> from the list.</li>
+      <li>Under <strong>Repository access</strong>, choose <strong>All repositories</strong>, meaning all of <span class="orgname"></span>'s repositories and nothing else. A link can't fill this in.</li>
+      <li>Leave the permissions as they are, click <strong>Generate token</strong>, and copy it.</li>
+    </ol>
+    <div class="row">
+      <label>Setup token <input id="setupToken" class="wide" type="password" placeholder="github_pat_…" autocomplete="off" spellcheck="false"></label>
+      <button class="btn" id="checkSetup" type="button">Check it</button>
+    </div>
+    <ul class="checks" id="setupChecks"></ul>
+    <div class="status" id="setupStatus"></div>
+
+    <details>
+      <summary>Every permission it asks for, and why</summary>
+      <table class="perms">
+        <tr><td>Organization administration</td><td>Lock down what members can do: students can't create, delete or publish repositories</td></tr>
+        <tr><td>Administration</td><td>Create the course repository</td></tr>
+        <tr><td>Contents</td><td>Write <code>course.json</code>, your course's settings</td></tr>
+        <tr><td>Issues</td><td>Add the labels the bot uses on registrations</td></tr>
+        <tr><td>Secrets</td><td>Store the roster and the bot's token, sealed</td></tr>
+        <tr><td>Actions, Workflows</td><td>Run the workflow that writes the students' form</td></tr>
+        <tr><td>Pages</td><td>Publish your course's own page</td></tr>
+        <tr><td>Members (read only)</td><td>Check that you own the organization</td></tr>
+      </table>
+    </details>
+  </section>
+
+  <!-- 3 -->
+  <section class="wstep" data-step="3" hidden>
+    <h2>The course</h2>
+    <p>Students see the name. Classes are the weekly sessions that soft deadlines are counted from. Leave them out if your course has none.</p>
+    <div class="row">
+      <label>Course name <input id="cName" class="wide" placeholder="Distributed Systems"></label>
+    </div>
+    <div class="row">
+      <label>Smallest group <input id="cMin" type="number" min="1" max="6" value="2"></label>
+      <label>Largest group <input id="cMax" type="number" min="1" max="6" value="2"></label>
+      <label>Time zone <select id="cTz"></select></label>
+    </div>
+    <div class="row">
+      <label>What students call their number (optional) <input id="cHint" class="wide" placeholder="your student number"></label>
+    </div>
+    <table class="classes">
+      <thead><tr><th>Class</th><th>Day</th><th>Session ends</th><th>Note (optional)</th><th></th></tr></thead>
+      <tbody id="classRows"></tbody>
+    </table>
+    <button class="btn small" id="addClass" type="button">+ Add a class</button>
+    <div class="status" id="courseStatus"></div>
+  </section>
+
+  <!-- 4 -->
+  <section class="wstep" data-step="4" hidden>
+    <h2>Your students</h2>
+    <p class="callout"><strong>These files don't leave your computer.</strong> They're read here, in your browser.
+      Only the student numbers (and classes) found in them are sent to GitHub, sealed as secrets.</p>
+    <p>The roster is who may register: a CSV export with a student-number column, or a plain list of numbers.
+      Class listings are optional: one file per class with a <code>Class: P1</code> (or <code>Turno: P1</code>) line,
+      or one file of <code>number,class</code> lines.</p>
+    <div class="row">
+      <label>Roster <input id="roster" type="file" accept=".csv,.tsv,.txt,text/*"></label>
+      <label id="colWrap" hidden>Student-number column <select id="rosterCol"></select></label>
+    </div>
+    <div class="status" id="rosterStatus"></div>
+    <div class="row">
+      <label>Class listings <input id="listings" type="file" multiple></label>
+    </div>
+    <div class="status" id="listingStatus"></div>
+    <div class="row">
+      <label>Test students <input id="testN" type="number" min="0" max="20" value="2"></label>
+      <span class="hint">Adds 99901, 99902, … so you can register a test group with your own accounts. Set it to 0 on the course's page before term.</span>
+    </div>
+    <div class="status" id="studentsStatus"></div>
+  </section>
+
+  <!-- 5 -->
+  <section class="wstep" data-step="5" hidden>
+    <h2>The bot's token</h2>
+    <p>The bot is the set of GitHub Actions workflows in your course repository. They create teams and repositories
+      and lock them at deadlines, so they need a token of their own, kept for the whole term.</p>
+
+    <div class="tokenbox">
+      <h3>How the bot's token works</h3>
+      <ul>
+        <li><strong>It reaches <span class="orgname"></span> and nothing else.</strong> Like the setup token, it's fine-grained and made for
+          <span class="orgname"></span> alone. The page checks that before storing it.</li>
+        <li><strong>It's sealed, then kept by GitHub.</strong> Your browser encrypts it with the course repository's public key.
+          It's stored as that repository's secret <code>ORG_ADMIN_TOKEN</code>. From then on only that repository's workflows can read it:
+          not this page, not other repositories, not even you on GitHub.</li>
+        <li><strong>It can do only what the bot does.</strong> Every permission is listed below.</li>
+        <li><strong>It lasts as long as your term.</strong> When it runs out the bot stops, your course's page tells you, and you replace it there.</li>
+        <li><strong>It acts as whoever makes it,</strong> who must own <span class="orgname"></span>. A separate GitHub account just for the bot,
+          made an owner, keeps the bot's actions apart from yours.</li>
+      </ul>
+    </div>
+
+    <h3 class="minor">Make it</h3>
+    <ol class="howto">
+      <li><label class="inline">It should last <input id="botDays" type="number" min="1" max="366" value="180"> days</label></li>
+      <li><a class="btn small" id="botTokenLink" target="_blank" rel="noopener">Open GitHub's token page, filled in ↗</a></li>
+      <li>Check that <strong>Resource owner</strong> says <strong class="orgname"></strong>, and choose <strong>All repositories</strong>.
+        The bot creates new repositories all term.</li>
+      <li>Leave the permissions as they are, generate it, and copy it.</li>
+    </ol>
+    <div class="row">
+      <label>Bot token <input id="botToken" class="wide" type="password" placeholder="github_pat_…" autocomplete="off" spellcheck="false"></label>
+      <button class="btn" id="checkBot" type="button">Check it</button>
+    </div>
+    <ul class="checks" id="botChecks"></ul>
+    <div class="status" id="botStatus"></div>
+
+    <details>
+      <summary>Every permission it asks for, and why</summary>
+      <table class="perms">
+        <tr><td>Administration</td><td>Create each group's repositories, give their team access, and make them read-only at the hard deadline</td></tr>
+        <tr><td>Contents</td><td>Put the starting files in, and archive every push</td></tr>
+        <tr><td>Issues</td><td>Tell each group about a new assignment</td></tr>
+        <tr><td>Commit statuses</td><td>Mark commits pushed after the soft deadline as late</td></tr>
+        <tr><td>Workflows</td><td>Copy starting files that contain workflows of their own</td></tr>
+        <tr><td>Members</td><td>Create each group's team and invite its students</td></tr>
+      </table>
+    </details>
+  </section>
+
+  <!-- 6 -->
+  <section class="wstep" data-step="6" hidden>
+    <h2>Set it up</h2>
+    <p>Here's everything that happens. Each part checks what's there first, so running it again changes only what differs.</p>
+    <ul class="plan" id="plan"></ul>
+    <button class="btn primary" id="runSetup" type="button">Set up the course</button>
+    <ol class="log" id="setupLog"></ol>
+    <div class="done" id="setupDone"></div>
+  </section>
+
+  <div class="wizard-nav">
+    <button class="btn" id="back" type="button">← Back</button>
+    <button class="btn primary" id="next" type="button">Next →</button>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>bedel is free: read it, change it, run it. <a data-template="" data-label href="https://github.com/ajccosta/bedel">github.com/ajccosta/bedel</a> ·
+      <a data-template="/blob/main/scripts/README.md" href="https://github.com/ajccosta/bedel/blob/main/scripts/README.md">Staff guide</a> ·
+      <a data-template="/tree/main/web" href="https://github.com/ajccosta/bedel/tree/main/web">This page's code</a></p>
+    <p><em>Bedel</em> is Portuguese for the university porter who keeps the rooms and the timetable: he lets you in, and locks the door when time is up.</p>
+    <p class="credit">
+      <a href="https://www.anthropic.com/claude">Written by Claude Opus 5.5</a>
+      <a class="anthropic" href="https://www.anthropic.com" aria-label="Anthropic"><span aria-hidden="true"></span></a>
+    </p>
+  </div>
+</footer>
+
+<script type="module" src="js/setup.js"></script>
+</body>
+</html>

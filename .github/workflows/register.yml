@@ -1,0 +1,55 @@
+name: Group registration
+
+on:
+  issues:
+    types: [opened]
+  issue_comment:
+    types: [created]
+  schedule:
+    - cron: "*/30 * * * *"   # safety net: retries anything pending or failed
+  workflow_dispatch:
+
+# Runs one at a time, so group numbers are never handed out twice.
+# Every run processes ALL open registration issues, so a run that gets
+# dropped from the queue loses nothing.
+concurrency:
+  group: registration
+  cancel-in-progress: false
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  register:
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (!github.event.issue.pull_request && startsWith(github.event.comment.body, '/confirm'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # bedel itself, or a copy not yet set up for a course, has no course.json:
+      # then there is nothing to do, and failing every half hour would only
+      # bury the repo in failure emails.
+      - name: Set up for a course?
+        id: course
+        run: |
+          if [ -f course.json ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No course.json yet - run scripts/setup.sh to set this repo up for a course."
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.course.outputs.ready
+        with:
+          python-version: "3.12"
+      - name: Process registrations
+        if: steps.course.outputs.ready
+        run: python scripts/register.py
+        env:
+          ORG: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
+          ROSTER: ${{ secrets.ROSTER }}
+          CLASSES: ${{ secrets.CLASSES }}
+          ADMIN_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
+          ISSUES_TOKEN: ${{ secrets.GITHUB_TOKEN }}

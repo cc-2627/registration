@@ -1,0 +1,112 @@
+name: Release an assignment
+
+# What scripts/new_assignment.py does from a laptop, from GitHub instead: run it
+# from the Actions tab (Run workflow) or the bedel setup page. It marks the
+# starting-files repository a template, gives every registered group its own
+# repository from it, opens an issue there that emails the group, and commits
+# assignments/<name>.json with the deadlines. Re-running with the same name
+# changes the deadlines; existing repositories are left alone.
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: "Short name, e.g. a1 (lowercase letters, digits, - and _)"
+        required: true
+        type: string
+      template:
+        description: "Repository in this organization holding the starting files (default: <name>-template)"
+        required: false
+        type: string
+      soft_week:
+        description: "Soft deadline by class: any date in the week whose sessions start the clock, e.g. 2026-11-03"
+        required: false
+        type: string
+      soft:
+        description: "...or one soft deadline for everyone, e.g. 2026-11-15 23:59, or none"
+        required: false
+        type: string
+      hard:
+        description: "Hard deadline, e.g. 2026-11-22 23:59 (repositories become read-only), or none"
+        required: false
+        type: string
+      carry_over:
+        description: "Start from each group's repository for this earlier assignment (optional)"
+        required: false
+        type: string
+      own_work:
+        description: "Groups bring their own work: each repository starts empty, and the announcement shows them how to push theirs in"
+        required: false
+        type: boolean
+        default: false
+      dry_run:
+        description: "Only show what would happen"
+        required: false
+        type: boolean
+        default: false
+
+# Shares the registration workflow's queue, so a group registering while an
+# assignment is released can't end up with its repository created twice.
+concurrency:
+  group: registration
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up for a course?
+        id: course
+        run: |
+          if [ -f course.json ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::No course.json yet - set this repository up for a course first."
+            exit 1
+          fi
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The inputs reach the script through the environment, never pasted into
+      # the shell, so nothing typed into the form is ever run as a command.
+      - name: Release
+        env:
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
+          ORG: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
+          CLASSES: ${{ secrets.CLASSES }}
+          NAME: ${{ inputs.name }}
+          TEMPLATE: ${{ inputs.template }}
+          SOFT_WEEK: ${{ inputs.soft_week }}
+          SOFT: ${{ inputs.soft }}
+          HARD: ${{ inputs.hard }}
+          CARRY_OVER: ${{ inputs.carry_over }}
+          OWN_WORK: ${{ inputs.own_work }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=("$NAME" --repo "${REPO#*/}")
+          if [ "$OWN_WORK" = "true" ]; then
+            args+=(--own-work)
+          elif [ ! -f "assignments/$NAME.json" ]; then
+            # A new assignment needs its starting files to exist, or every group
+            # gets a repository with only a README. (Re-running an existing one,
+            # to move a deadline, keeps whatever it started from.)
+            template=${TEMPLATE:-$NAME-template}
+            if [ "$DRY_RUN" != "true" ] && ! gh api "repos/$ORG/$template" --silent 2>/dev/null; then
+              echo "::error::$ORG/$template doesn't exist. Create it with the starting files first (the course page can upload a folder), or let groups bring their own work."
+              exit 1
+            fi
+            args+=(--template "$template")
+          elif [ -n "$TEMPLATE" ]; then
+            args+=(--template "$TEMPLATE")
+          fi
+          if [ -n "$SOFT_WEEK" ]; then args+=(--soft-week "$SOFT_WEEK"); fi
+          if [ -n "$SOFT" ]; then args+=(--soft "$SOFT"); fi
+          if [ -n "$HARD" ]; then args+=(--hard "$HARD"); fi
+          if [ -n "$CARRY_OVER" ]; then args+=(--carry-over "$CARRY_OVER"); fi
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          python scripts/new_assignment.py "${args[@]}"
