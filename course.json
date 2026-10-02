@@ -1,0 +1,22 @@
+{
+  "name": "Computação em Cloud",
+  "group_size": {
+    "min": 2,
+    "max": 2
+  },
+  "timezone": "Europe/Lisbon",
+  "classes": {
+    "P1": {
+      "day": "tuesday",
+      "ends": "16:00"
+    },
+    "P2": {
+      "day": "thursday",
+      "ends": "13:00"
+    },
+    "P3": {
+      "day": "tuesday",
+      "ends": "13:00"
+    }
+  }
+}
