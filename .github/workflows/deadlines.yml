@@ -1,0 +1,69 @@
+name: Assignment deadlines
+
+# Locks group repositories once an assignment's hard deadline has passed, and
+# reports who pushed before which deadline. Assignments are defined in
+# assignments/*.json by scripts/new_assignment.py.
+
+on:
+  schedule:
+    # Every 30 min. A run that starts before a hard deadline waits for the exact
+    # moment (--wait below), so the lock is punctual even though GitHub's own
+    # scheduling is not: 5 minutes is its shortest interval and runs are often
+    # delayed under load.
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+    inputs:
+      report_only:
+        description: "Report without locking anything"
+        type: boolean
+        default: false
+
+concurrency:
+  group: deadlines
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deadlines:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90   # a run may sit waiting for a deadline; never longer than this
+    steps:
+      - uses: actions/checkout@v4
+      # bedel itself, or a copy not yet set up for a course, has no course.json:
+      # then there is nothing to do, and failing every half hour would only
+      # bury the repo in failure emails.
+      - name: Set up for a course?
+        id: course
+        run: |
+          if [ -f course.json ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No course.json yet - run scripts/setup.sh to set this repo up for a course."
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.course.outputs.ready
+        with:
+          python-version: "3.12"
+      # Before the enforce step, which may sit waiting for a deadline: the
+      # archive copies an API window that expires, so it must not be delayed.
+      # Its failure is not allowed to stop a lock from happening.
+      - name: Archive pushes
+        if: steps.course.outputs.ready
+        continue-on-error: true
+        run: python scripts/pushlog.py
+        env:
+          ORG: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
+          ADMIN_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
+
+      - name: Enforce and report
+        if: steps.course.outputs.ready
+        run: |
+          python scripts/deadlines.py ${{ inputs.report_only && '--report' || '--wait 35' }}
+        env:
+          ORG: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
+          CLASSES: ${{ secrets.CLASSES }}
+          ADMIN_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}

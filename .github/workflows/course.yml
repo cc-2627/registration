@@ -1,0 +1,64 @@
+name: Course files
+
+# Regenerates what students see - .github/README.md and the registration form -
+# whenever course.json changes, so editing that one file (by hand, from GitHub's
+# web editor or from the bedel setup page) is all a change takes.
+# scripts/setup/06_course.sh does the same on your machine; when it already has,
+# this finds nothing to do. It runs again after the course's page is published,
+# which adds a link to that page.
+
+on:
+  push:
+    branches: [main]
+    paths: [course.json]
+  workflow_run:
+    workflows: ["Setup page"]
+    types: [completed]
+  workflow_dispatch:
+
+concurrency:
+  group: course-files
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pages: read
+
+jobs:
+  render:
+    # After a page deploy, only once it worked.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # bedel itself, or a copy not yet set up for a course, has no course.json.
+      - name: Set up for a course?
+        id: course
+        run: |
+          if [ -f course.json ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No course.json yet - run scripts/setup.sh to set this repo up for a course."
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.course.outputs.ready
+        with:
+          python-version: "3.12"
+      - name: Generate and commit
+        if: steps.course.outputs.ready
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The course's page, when Pages publishes it, gets a link on the students' page.
+          # gh prints GitHub's error on stdout, so a repo without Pages has to be caught by the exit code.
+          page=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq 'select(.build_type == "workflow") | .html_url' 2>/dev/null) || page=""
+          python scripts/setup/course.py render --repo "$GITHUB_REPOSITORY" ${page:+--page "$page"}
+          git add -- .github/README.md .github/ISSUE_TEMPLATE
+          if git diff --cached --quiet; then
+            echo "Already up to date."
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "Generate the students' README and form from course.json"
+          git push
