@@ -1,0 +1,66 @@
+name: Register your group
+description: Register your group to get your team and repositories.
+title: "Group registration"
+labels: ["registration"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Fill in **every** member of your group, **including yourself**.
+        - Student number = digits only.
+        - GitHub username = the account you will use for the course.
+        - Class = leave it blank. We fill it in from the class list, and only
+          need you to pick one if that list has you in the wrong class.
+
+        After you submit, the bot checks the details. Every other member must then reply `/confirm` on this issue.
+        Your team and repositories are created automatically once everyone has confirmed.
+  - type: input
+    id: m1_number
+    attributes:
+      label: "Member 1 - student number"
+      placeholder: "61234"
+    validations:
+      required: true
+  - type: input
+    id: m1_user
+    attributes:
+      label: "Member 1 - GitHub username"
+      placeholder: "octocat"
+    validations:
+      required: true
+  - type: dropdown
+    id: m1_class
+    attributes:
+      label: "Member 1 - class"
+      description: "Leave this blank and we fill it in from the class list. Only pick one if the list has you in the wrong class - say the one you actually go to."
+      options:
+        - P1
+        - P2
+        - P3
+    validations:
+      required: false
+  - type: input
+    id: m2_number
+    attributes:
+      label: "Member 2 - student number"
+      placeholder: "61789"
+    validations:
+      required: true
+  - type: input
+    id: m2_user
+    attributes:
+      label: "Member 2 - GitHub username"
+      placeholder: "hubot"
+    validations:
+      required: true
+  - type: dropdown
+    id: m2_class
+    attributes:
+      label: "Member 2 - class"
+      description: "Leave this blank and we fill it in from the class list. Only pick one if the list has you in the wrong class - say the one you actually go to."
+      options:
+        - P1
+        - P2
+        - P3
+    validations:
+      required: false
