@@ -4,6 +4,9 @@ Register your group here. You only do this once, for the whole semester.
 
 ### [→ Open a registration issue](https://github.com/cc-2627/registration/issues/new?template=register.yml)
 
+**[The course's page](https://cc-2627.github.io/registration/)** shows the assignments, their deadlines and
+how many groups have registered. Staff run the course from there too.
+
 Fill in **every** member of the group, including yourself:
 
 - **student number** — digits only
