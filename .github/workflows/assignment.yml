@@ -22,6 +22,10 @@ on:
         description: "Soft deadline by class: any date in the week whose sessions start the clock, e.g. 2026-11-03"
         required: false
         type: string
+      soft_time:
+        description: "With the soft week: the time each class's soft deadline ends, e.g. 23:59 (default: when its session ends; session to go back to that)"
+        required: false
+        type: string
       soft:
         description: "...or one soft deadline for everyone, e.g. 2026-11-15 23:59, or none"
         required: false
@@ -82,6 +86,7 @@ jobs:
           NAME: ${{ inputs.name }}
           TEMPLATE: ${{ inputs.template }}
           SOFT_WEEK: ${{ inputs.soft_week }}
+          SOFT_TIME: ${{ inputs.soft_time }}
           SOFT: ${{ inputs.soft }}
           HARD: ${{ inputs.hard }}
           CARRY_OVER: ${{ inputs.carry_over }}
@@ -105,6 +110,7 @@ jobs:
             args+=(--template "$TEMPLATE")
           fi
           if [ -n "$SOFT_WEEK" ]; then args+=(--soft-week "$SOFT_WEEK"); fi
+          if [ -n "$SOFT_TIME" ]; then args+=(--soft-time "$SOFT_TIME"); fi
           if [ -n "$SOFT" ]; then args+=(--soft "$SOFT"); fi
           if [ -n "$HARD" ]; then args+=(--hard "$HARD"); fi
           if [ -n "$CARRY_OVER" ]; then args+=(--carry-over "$CARRY_OVER"); fi

@@ -27,7 +27,7 @@ def soft_deadline(ctx):
     """The group's soft deadline, or None to leave it to the assignment.
 
     `ctx` gives you:
-        ctx.assignment      the definition dict, including soft_week
+        ctx.assignment      the definition dict, including soft_week and soft_time
         ctx.group           name, students (numbers), users
         ctx.classes          {student number: class} for this group's members,
                             as claimed at registration, falling back to the
@@ -37,7 +37,9 @@ def soft_deadline(ctx):
         ctx.note(text)      leave a note on this group in the report
 
     The default: a group gets a week from its *earliest* member's session, so a
-    mixed-class group is held to the earlier of the two.
+    mixed-class group is held to the earlier of the two. That's when the session
+    ends, unless the assignment gives a time of day (soft_time, "23:59"): then
+    it's that time, on the same day.
     """
     if ctx.override:
         return ctx.override
@@ -54,4 +56,8 @@ def soft_deadline(ctx):
 
     if len(set(ctx.classes.values())) > 1:
         ctx.note("mixed classes " + ",".join(sorted(set(ctx.classes.values()))))
-    return min(sessions) + AFTER_SESSION
+    deadline = min(sessions) + AFTER_SESSION
+    if ctx.assignment.get("soft_time"):
+        hour, minute = (int(x) for x in ctx.assignment["soft_time"].split(":"))
+        deadline = deadline.replace(hour=hour, minute=minute)
+    return deadline

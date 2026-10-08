@@ -109,9 +109,15 @@ function editForm(d, course) {
   mode.value = !d.soft_manual && d.soft_week && classes ? "week" : d.soft_deadline ? "date" : d.soft_manual ? "none" : "date";
   const week = input("date", d.soft_week || "");
   const date = input("datetime-local", local(d.soft_deadline, tz));
+  const time = input("time", d.soft_time || "");
   const weekWrap = field("Week of", week);
+  const timeWrap = field("Ending at", time);
+  timeWrap.append(el("span", "Empty: when each class's session ends.", "hint"));
   const dateWrap = field("On", date);
-  const showMode = () => { weekWrap.hidden = mode.value !== "week"; dateWrap.hidden = mode.value !== "date"; };
+  const showMode = () => {
+    weekWrap.hidden = timeWrap.hidden = mode.value !== "week";
+    dateWrap.hidden = mode.value !== "date";
+  };
   mode.onchange = showMode;
   showMode();
 
@@ -123,7 +129,7 @@ function editForm(d, course) {
   const neverLabel = el("label", undefined, "check");
   neverLabel.append(never, " Never lock");
 
-  const r1 = el("div", undefined, "row"); r1.append(field("Soft deadline", mode), weekWrap, dateWrap);
+  const r1 = el("div", undefined, "row"); r1.append(field("Soft deadline", mode), weekWrap, timeWrap, dateWrap);
   const r2 = el("div", undefined, "row"); r2.append(field("Hard deadline (repositories lock)", hard), neverLabel);
   const note = el("p", `Times are in ${tz}. Saving changes only the dates: repositories and their work stay as they are. `
     + "A repository already locked opens again if the hard deadline moves later.", "hint");
@@ -140,6 +146,7 @@ function editForm(d, course) {
       if (mode.value === "week") {
         if (!week.value) throw new Error("Pick the week the class sessions start the clock.");
         inputs.soft_week = week.value;
+        inputs.soft_time = time.value || "session";
       } else if (mode.value === "date") {
         if (!date.value) throw new Error("Pick the soft deadline.");
         inputs.soft = date.value.replace("T", " ");
