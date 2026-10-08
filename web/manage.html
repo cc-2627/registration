@@ -159,7 +159,8 @@
             <li><strong>It sees only what you can see.</strong> GitHub gives it your own access in <span class="orgname"></span>,
               no more: your group's repositories, not anyone else's, and nothing outside <span class="orgname"></span>.</li>
             <li><strong>It goes only to GitHub.</strong> It stays in this tab's memory and is sent only to <code>api.github.com</code>;
-              closing the tab forgets it. It expires in 30 days, or delete it on GitHub any time.</li>
+              closing the tab forgets it, unless you tick <em>Remember</em>: then this browser keeps it until you forget it or it expires.
+              It expires in 30 days, or delete it on GitHub any time.</li>
           </ul>
         </div>
         <ol class="howto">
@@ -170,6 +171,10 @@
         <div class="row">
           <label>Key <input id="studentToken" class="wide" type="password" placeholder="github_pat_…" autocomplete="off" spellcheck="false"></label>
           <button class="btn primary" id="checkStudent" type="button">Show my group</button>
+        </div>
+        <div class="row">
+          <label class="check"><input id="rememberStudent" type="checkbox"> Remember it on this computer</label>
+          <button class="linkish" id="forgetStudent" type="button" hidden>Forget the saved key</button>
         </div>
         <div class="status" id="studentStatus"></div>
       </div>
@@ -189,7 +194,9 @@
             <li><strong>It reaches <span class="orgname"></span> and nothing else.</strong> It's a fine-grained token made for
               <span class="orgname"></span>. Classic tokens are refused, and the page proves the token belongs to <span class="orgname"></span> before using it.</li>
             <li><strong>It goes only to GitHub.</strong> It stays in this tab's memory and is sent only to <code>api.github.com</code>.
-              The page's Content-Security-Policy stops your browser from letting it connect anywhere else. Closing the tab forgets it.</li>
+              The page's Content-Security-Policy stops your browser from letting it connect anywhere else. Closing the tab forgets it,
+              unless you tick <em>Remember</em>: then this browser keeps it, and signs you in, until you forget it or it expires.
+              Anyone using this browser could then change the course, so don't tick it on a shared computer.</li>
             <li><strong>This page is your course's own copy.</strong> It's published from <span class="reponame"></span>'s <code>web/</code> folder,
               and changes only when you pull bedel's updates.</li>
             <li><strong>Make it last as long as you need it.</strong> A week is plenty for a round of changes. Make another next time.</li>
@@ -203,6 +210,10 @@
         <div class="row">
           <label>Token <input id="courseToken" class="wide" type="password" placeholder="github_pat_…" autocomplete="off" spellcheck="false"></label>
           <button class="btn" id="checkCourse" type="button">Check it</button>
+        </div>
+        <div class="row">
+          <label class="check"><input id="rememberCourse" type="checkbox"> Remember it on this computer</label>
+          <button class="linkish" id="forgetCourse" type="button" hidden>Forget the saved token</button>
         </div>
         <ul class="checks" id="courseChecks"></ul>
         <div class="status" id="courseTokenStatus"></div>
