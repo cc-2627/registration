@@ -192,7 +192,18 @@ function refreshLinks() {
     "The course bot's token: creates teams and repos, locks them at deadlines", days("botDays", 180), BOT_PERMISSIONS);
 }
 
-async function signIn() {
+// A key kept in this browser, only when its owner ticks Remember: per course and
+// per role, so a student's key and a teacher's token never stand in for each other.
+const keyName = (who) => `bedel-key:${ctx.org}/${ctx.repo}:${who}`;
+function savedKey(who) { try { return localStorage.getItem(keyName(who)) || ""; } catch { return ""; } }
+function keepKey(who, token) {
+  try { if (token) localStorage.setItem(keyName(who), token); else localStorage.removeItem(keyName(who)); } catch {}
+  const id = who === "teacher" ? "Course" : "Student";
+  $(`forget${id}`).hidden = !token;
+  $(`remember${id}`).checked = !!token;
+}
+
+async function signIn(saved = false) {
   const list = $("courseChecks");
   list.innerHTML = "";
   const passed = (t) => list.append(el("li", t));
@@ -204,8 +215,14 @@ async function signIn() {
   } catch (e) {
     ctx.login = null; ctx.token = "";
     $("tools").hidden = true;
+    if (saved) {
+      keepKey("teacher", "");
+      $("courseToken").value = "";
+      return setStatus("courseTokenStatus", `The saved token no longer works, so this browser has forgotten it: ${e.message}`, "bad");
+    }
     return setStatus("courseTokenStatus", e.message, "bad");
   }
+  keepKey("teacher", $("rememberCourse").checked ? token : "");
   setStatus("courseTokenStatus", `Ready. Changes are made as ${ctx.login}.`, "ok");
   if (course) fillCourse(course);
   $("tools").hidden = false;
@@ -280,14 +297,37 @@ function setRole(r) {
   showView();
 }
 
-async function showMine() {
+// Signs in with a remembered key, once the page knows who's looking.
+async function resume() {
+  const who = role();
+  const saved = who && savedKey(who);
+  if (!saved) return;
+  if (who === "teacher" && !ctx.login) {
+    $("courseToken").value = saved;
+    keepKey(who, saved);
+    await signIn(true);
+  } else if (who === "student" && !$("mineSignin").hidden) {
+    $("studentToken").value = saved;
+    keepKey(who, saved);
+    await showMine(true);
+  }
+}
+
+async function showMine(saved = false) {
   setStatus("studentStatus", "Looking…");
+  const token = $("studentToken").value.trim();
   try {
-    const data = await loadMine($("studentToken").value.trim(), defsNow);
+    const data = await loadMine(token, defsNow);
     renderMine($("mineOut"), data, when, course?.timezone || "UTC");
+    keepKey("student", $("rememberStudent").checked ? token : "");
     $("mineSignin").hidden = true;
     setStatus("studentStatus", "");
   } catch (e) {
+    if (saved) {
+      keepKey("student", "");
+      $("studentToken").value = "";
+      return setStatus("studentStatus", `The saved key no longer works, so this browser has forgotten it: ${e.message}`, "bad");
+    }
     setStatus("studentStatus", e.message, "bad");
   }
 }
@@ -307,10 +347,18 @@ $("copyLink").onclick = async () => {
   try { await navigator.clipboard.writeText($("studentLink").value); $("copyLink").textContent = "Copied"; }
   catch { $("studentLink").select(); }
 };
-$("checkCourse").onclick = signIn;
-$("checkStudent").onclick = showMine;
+$("checkCourse").onclick = () => signIn();
+$("checkStudent").onclick = () => showMine();
 $("studentToken").addEventListener("keydown", (e) => { if (e.key === "Enter") showMine(); });
-for (const b of document.querySelectorAll("[data-role]")) b.onclick = async () => { setRole(b.dataset.role); await refresh(); };
+$("forgetCourse").onclick = () => {
+  keepKey("teacher", "");
+  setStatus("courseTokenStatus", "This browser has forgotten the token. The page still has it until you close the tab.", "ok");
+};
+$("forgetStudent").onclick = () => {
+  keepKey("student", "");
+  setStatus("studentStatus", "This browser has forgotten the key. The page still has it until you close the tab.", "ok");
+};
+for (const b of document.querySelectorAll("[data-role]")) b.onclick = async () => { setRole(b.dataset.role); await refresh(); await resume(); };
 $("switchRole").onclick = () => { setRole(null); scrollTo(0, 0); };
 $("courseToken").addEventListener("keydown", (e) => { if (e.key === "Enter") signIn(); });
 $("courseDays").addEventListener("input", refreshLinks);
@@ -333,4 +381,5 @@ else {
   try { remembered = localStorage.getItem("bedel-role"); } catch {}
   setRole(["student", "teacher"].includes(remembered) ? remembered : null);
   await refresh();
+  await resume();
 }

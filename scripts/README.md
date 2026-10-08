@@ -760,6 +760,14 @@ administrator approval* under the organization's **Settings → Personal access 
 once. **Teachers** see everything, and change things with a token as above. The choice
 protects nothing on its own: every change still needs an owner's token.
 
+A token or key lives in the tab's memory, so closing the tab forgets it, unless its owner
+ticks *Remember it on this computer*. Then the browser keeps it, for that course and that
+role only, and the page signs in by itself next time, until *Forget* is clicked or the
+token stops working (it's dropped then too). Remembering the teacher's token means anyone
+using that browser can change the course, so the box starts unticked. Every page on the
+same `ORG.github.io` address could also read it, which matters only if someone else can
+publish Pages from one of the organization's repositories: only its owners can.
+
 Under each assignment, *Each group's progress* shows, per group: its classes, a chart of
 commits per day with the soft and hard deadlines marked, commits, days with work, the last
 work and how long it's been quiet, commits after the group's soft deadline, the share made
