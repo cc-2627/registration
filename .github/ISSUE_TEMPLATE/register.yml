@@ -45,14 +45,14 @@ body:
       label: "Member 2 - student number"
       placeholder: "61789"
     validations:
-      required: false
+      required: true
   - type: input
     id: m2_user
     attributes:
       label: "Member 2 - GitHub username"
       placeholder: "hubot"
     validations:
-      required: false
+      required: true
   - type: dropdown
     id: m2_class
     attributes:
