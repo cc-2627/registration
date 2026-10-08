@@ -359,6 +359,19 @@ new_assignment.py a3 --soft-week 2026-11-03 --hard "2026-11-29 23:59"
 required for a new assignment. `--soft "2026-11-20 23:59"` instead sets one deadline for
 everyone and turns the per-class rule off for that assignment.
 
+Each class's soft deadline ends when its session ends, a week on. Add `--soft-time 23:59`
+to end it at that time instead, on the same day (*Ending at* on the course page):
+
+```
+new_assignment.py a3 --soft-week 2026-11-03 --soft-time 23:59 --hard "2026-11-29 23:59"
+
+  P1  Tue 11-03 16:00  ->  soft Tue 11-10 23:59
+  P2  Thu 11-05 13:00  ->  soft Thu 11-12 23:59
+```
+
+The time is kept when the assignment is re-run, until `--soft-time session` goes back to
+the session's end.
+
 **A group with members in different classes** is held to the *earliest* of their sessions,
 and the report says `mixed classes P1,P2` next to it. **A group whose classes are unknown**
 falls back to the assignment's stored soft deadline, which is the latest class's — missing

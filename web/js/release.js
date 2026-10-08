@@ -13,7 +13,10 @@ function readInputs(name) {
   const isNew = !session.assignments.includes(name);
   const mode = $("aSoftMode").value;
   const inputs = { name };
-  if (mode === "week" && $("aSoftWeek").value) inputs.soft_week = $("aSoftWeek").value;
+  if (mode === "week" && $("aSoftWeek").value) {
+    inputs.soft_week = $("aSoftWeek").value;
+    if ($("aSoftTime").value) inputs.soft_time = $("aSoftTime").value;
+  }
   else if (mode === "date" && $("aSoft").value) inputs.soft = asDeadline($("aSoft").value);
   else if (mode === "none") inputs.soft = "none";
   if ($("aNoHard").checked) inputs.hard = "none";

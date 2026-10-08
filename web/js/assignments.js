@@ -38,6 +38,7 @@ function refreshSoftModes() {
   if (!classes && sel.value === "week") sel.value = "date";
   else if (classes && !softModeChosen) sel.value = "week";
   $("aSoftWeekWrap").hidden = sel.value !== "week";
+  $("aSoftTimeWrap").hidden = sel.value !== "week";
   $("aSoftDateWrap").hidden = sel.value !== "date";
 }
 

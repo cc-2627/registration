@@ -32,6 +32,7 @@ import datetime
 import glob
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -185,6 +186,10 @@ def main():
                     help="any date in the week whose sessions start the clock; each "
                          "class then gets a week from its own session (see rules.py). "
                          "Required for a new assignment unless --soft is given.")
+    ap.add_argument("--soft-time", dest="soft_time", metavar="HH:MM",
+                    help="with --soft-week: the time of day each class's soft deadline "
+                         "ends, e.g. 23:59, instead of when its session ends; 'session' "
+                         "to go back to that")
     ap.add_argument("--soft", metavar="WHEN",
                     help="one soft deadline for everyone, overriding the per-class "
                          "rule, e.g. '2026-11-15 23:59'; 'none' to have none")
@@ -238,6 +243,16 @@ def main():
         if args.soft:
             sys.exit("--soft and --soft-week set the same thing two different ways; "
                      "pass one.")
+    soft_time = None
+    if args.soft_time:
+        if args.soft:
+            sys.exit("--soft-time is the time of day for --soft-week's per-class "
+                     "deadlines; --soft takes its own time, as in '2026-11-15 23:59'.")
+        if args.soft_time.strip().lower() != "session":
+            m = re.fullmatch(r"([01]?\d|2[0-3]):([0-5]\d)", args.soft_time.strip())
+            if not m:
+                sys.exit(f"--soft-time wants a time like 23:59, not {args.soft_time!r}.")
+            soft_time = f"{int(m[1]):02d}:{m[2]}"
     if args.folder and not os.path.isdir(args.folder):
         sys.exit(f"Not a folder: {args.folder}")
     if args.own_work and (args.folder or args.template or args.carry_over):
@@ -291,13 +306,15 @@ def main():
     if own_work:
         template = None
     soft_week = soft_week or existing.get("soft_week")
+    if not args.soft_time:
+        soft_time = existing.get("soft_time")
     soft_manual = bool(soft_given) if (soft_given or args.soft_week) \
         else existing.get("soft_manual", False)
 
     # Per class, for the announcement and for the printout. The group-level rule
     # runs later, in deadlines.py, because groups keep arriving.
     classes = load_classes() or load_classes(classes_from(args.classes))
-    probe = {"name": name, "soft_week": soft_week,
+    probe = {"name": name, "soft_week": soft_week, "soft_time": soft_time,
              "soft_deadline": soft.isoformat() if soft else None,
              "soft_manual": soft_manual}
     by_class = {}
@@ -324,7 +341,8 @@ def main():
         print(f"  template     {template}" + ("" if args.folder else "  (contents unchanged)"))
     if by_class:
         print(f"  soft week     {soft_week} (each class gets "
-              f"{rules.AFTER_SESSION.days} days from its own session)")
+              f"{rules.AFTER_SESSION.days} days from its own session, "
+              + (f"at {soft_time})" if soft_time else "until it ends)"))
         for t, when in sorted(by_class.items()):
             print(f"    {t}          {when}")
         print(f"  soft fallback {soft or '-'}  (groups with no known class)")
@@ -363,6 +381,7 @@ def main():
         "name": name,
         "template": template,
         "soft_week": soft_week,
+        "soft_time": soft_time,
         "soft_manual": soft_manual,
         # One date (or none) for everyone replaces any per-class dates.
         "soft_by_class": {} if soft_manual else (by_class or existing.get("soft_by_class", {})),
