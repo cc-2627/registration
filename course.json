@@ -1,7 +1,7 @@
 {
   "name": "Computação em Cloud",
   "group_size": {
-    "min": 1,
+    "min": 2,
     "max": 2
   },
   "timezone": "Europe/Lisbon",
