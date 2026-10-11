@@ -10,8 +10,14 @@ Locally:
     GH_TOKEN=$(gh auth token) ORG=myorg python scripts/deadlines.py --report a3 --csv
     GH_TOKEN=$(gh auth token) ORG=myorg python scripts/deadlines.py --unlock a3
 
-Lateness is measured with the repository's `pushed_at`, which GitHub sets
-server-side on every push. Unlike a commit date, a student cannot backdate it.
+Lateness is measured on the graded commit - the head of the default branch -
+by when GitHub first received it (arrival.py): a server time, so unlike a commit
+date a student cannot backdate it. The repository's `pushed_at` is not enough on
+its own, because GitHub moves it for *any* ref update: a group that creates a
+`main` branch the day after the deadline, pointing at work pushed on time, would
+look late by it. Where no server record of the head survives, the group is
+reported as `unverified` for a person to check, never as late.
+
 Enforcement runs on a schedule, so a repo may stay writable for a while after
 the hard deadline - but anything pushed in that window still shows up as late,
 because the measurement uses the real push time, not the time we locked it.
@@ -24,20 +30,23 @@ import sys
 import time
 
 import rules
+from arrival import arrivals, describe, head_of, verdict
 from ghlib import (GitHub, GitHubError, default_org, grant_team, iso_z,
                    load_assignments, load_claims, load_groups, load_classes, now,
                    repo_name, resolve_soft, team_permission, to_dt)
 
 ORG = default_org()
 REPO = os.environ.get("REPO")   # "owner/name"; set by the workflow
+LOG_REPO = os.environ.get("LOG_REPO", "push-log")
 OPEN_PERMISSION = "push"
 LOCKED_PERMISSION = "pull"
 LATE_CONTEXT = "deadline/soft"
 BOUNDARY_TAG = "refs/tags/soft-deadline"
 
 
-def mark_late_commits(gh, org, repo, soft):
-    """Flag every commit after the soft deadline, and tag the last on-time one.
+def mark_late_commits(gh, org, repo, soft, branch, first):
+    """Flag every commit that reached GitHub after the soft deadline, and tag the
+    last one that made it in on time.
 
     A commit message cannot be changed without rewriting history and force-pushing
     into the student's repo, which would break their clones. A commit status is the
@@ -46,46 +55,71 @@ def mark_late_commits(gh, org, repo, soft):
     The tag makes the boundary usable from the command line:
         git fetch --tags && git log soft-deadline..HEAD
 
-    Commit dates come from the student's machine and can be backdated; the repo's
-    `pushed_at`, which the report uses, cannot. This marks up the history, it does
+    "After" means the commit's first arrival (`first`, from arrival.arrivals), not
+    its commit date, which the student's machine sets: a commit made on time and
+    pushed late is late, and one dated late but pushed on time is not. A commit
+    marked late by an earlier version that measured commit dates, and which in
+    fact arrived on time, gets a newer status that says so. Commits with no
+    server record are left alone and counted. This marks up the history, it does
     not decide who was late.
+
+    Returns (marked, unknown).
     """
-    if not soft:
-        return 0
-    marked = 0
+    if not soft or not branch:
+        return 0, 0
     try:
-        late = gh.paginate(f"/repos/{org}/{repo}/commits?since={iso_z(soft)}")
+        history = gh.paginate(f"/repos/{org}/{repo}/commits?sha={branch}")
     except GitHubError as e:
         if e.status == 409:   # still empty: a group that never pushed its work in
-            return 0
+            return 0, 0
         raise
-    for c in late:
+    marked = unknown = 0
+    boundary = None
+    for c in history:   # newest first
+        row = first.get(c["sha"])
+        when = to_dt(row["pushed_at"]) if row else None
+        if when is None:
+            unknown += 1
+            continue
+        if when <= soft:
+            boundary = boundary or c["sha"]
         try:
             current = gh.get(f"/repos/{org}/{repo}/commits/{c['sha']}/status")
-            if any(st.get("context") == LATE_CONTEXT
-                   for st in (current or {}).get("statuses", [])):
+            # Statuses come newest first; the first one in our context is in force.
+            ours = next((st for st in (current or {}).get("statuses", [])
+                         if st.get("context") == LATE_CONTEXT), None)
+            if when > soft and not (ours and ours.get("state") == "failure"):
+                state, text = "failure", "Reached GitHub after the soft deadline - counts as late"
+            elif when <= soft and ours and ours.get("state") == "failure":
+                state, text = "success", "Reached GitHub before the soft deadline"
+            else:
                 continue
             gh.post(f"/repos/{org}/{repo}/statuses/{c['sha']}", {
-                "state": "failure",
-                "context": LATE_CONTEXT,
-                "description": "Pushed after the soft deadline - counts as late",
+                "state": state, "context": LATE_CONTEXT,
+                "description": f"{text} ({row['pushed_at']})"[:140],
             })
-            marked += 1
+            marked += state == "failure"
         except GitHubError as e:
             print(f"  could not mark {c['sha'][:7]} in {repo}: {e}", file=sys.stderr)
 
     try:
-        before = gh.paginate(f"/repos/{org}/{repo}/commits?until={iso_z(soft)}&per_page=1")
-        if before and not gh.exists(f"/repos/{org}/{repo}/git/{BOUNDARY_TAG}"):
-            gh.post(f"/repos/{org}/{repo}/git/refs",
-                    {"ref": BOUNDARY_TAG, "sha": before[0]["sha"]})
+        if boundary and not gh.exists(f"/repos/{org}/{repo}/git/{BOUNDARY_TAG}"):
+            gh.post(f"/repos/{org}/{repo}/git/refs", {"ref": BOUNDARY_TAG, "sha": boundary})
     except GitHubError:
         pass
-    return marked
+    return marked, unknown
 
 
 def add_note(existing, text):
     return f"{existing}; {text}" if existing else text
+
+
+def marked_note(existing, marked, unknown):
+    if marked:
+        existing = add_note(existing, f"{marked} late commit(s) marked")
+    if unknown:
+        existing = add_note(existing, f"{unknown} commit(s) with no arrival time, not marked")
+    return existing
 
 
 def status(gh, org, group, assignment, soft=None, notes=(), class_="",
@@ -101,6 +135,7 @@ def status(gh, org, group, assignment, soft=None, notes=(), class_="",
     hard = to_dt(assignment.get("hard_deadline"))
     row = {
         "group": group["name"], "repo": repo, "pushed_at": None, "class": class_,
+        "head": "", "received": "", "via": "",
         "soft": "-", "hard": "-", "state": "", "note": "; ".join(notes),
     }
 
@@ -115,10 +150,30 @@ def status(gh, org, group, assignment, soft=None, notes=(), class_="",
 
     pushed = to_dt(info.get("pushed_at"))
     row["pushed_at"] = pushed.isoformat() if pushed else ""
-    if soft and pushed:
-        row["soft"] = "on time" if pushed <= soft else "late"
-    if hard and pushed:
-        row["hard"] = "on time" if pushed <= hard else "late"
+    branch = info.get("default_branch")
+    head = head_of(gh, org, repo, branch) if branch else None
+    first = arrivals(gh, org, repo, name, group["name"], branch, LOG_REPO) if head else {}
+    got = first.get(head) if head else None
+    received = to_dt(got["pushed_at"]) if got else None
+    if head:
+        row["head"] = head[:7]
+        row["received"] = received.isoformat() if received else ""
+        row["via"] = describe(got) if got else ""
+        row["soft"] = verdict(soft, received, pushed)
+        row["hard"] = verdict(hard, received, pushed)
+        if received and pushed and pushed - received > datetime.timedelta(minutes=1) \
+                and (row["soft"] == "on time" and soft and pushed > soft
+                     or row["hard"] == "on time" and hard and pushed > hard):
+            # A new branch, a re-push, or late work force-pushed away again: the
+            # archive says which. What is graded is still the on-time commit.
+            row["note"] = add_note(row["note"], f"pushed again at {row['pushed_at']}, but {branch} "
+                                   "still holds the commit received on time - see the push archive")
+        if "unverified" in (row["soft"], row["hard"]):
+            row["note"] = add_note(row["note"], f"no server record of when {head[:7]} "
+                                   "arrived - check the push archive by hand")
+
+    if branch and not head:
+        row["note"] = add_note(row["note"], "empty: nothing pushed to grade")
 
     permission = team_permission(gh, org, repo, group["slug"])
     row["state"] = {"push": "writable", "pull": "read-only"}.get(permission, permission or "no access")
@@ -138,13 +193,11 @@ def status(gh, org, group, assignment, soft=None, notes=(), class_="",
         row["state"] = "read-only"
         row["note"] = add_note(row["note"], "locked now")
         # The history is final the moment it is locked, so mark it once, here.
-        n = mark_late_commits(gh, org, repo, soft)
-        if n:
-            row["note"] = add_note(row["note"], f"{n} late commit(s) marked")
-    elif mark and row["soft"] == "late":
-        n = mark_late_commits(gh, org, repo, soft)
-        if n:
-            row["note"] = add_note(row["note"], f"{n} late commit(s) marked")
+        row["note"] = marked_note(row["note"], *mark_late_commits(gh, org, repo, soft, branch, first))
+    elif mark and soft and head:
+        # Every group, not just the late ones: an on-time group may carry marks an
+        # earlier version set from commit dates, and this is what corrects them.
+        row["note"] = marked_note(row["note"], *mark_late_commits(gh, org, repo, soft, branch, first))
     return row
 
 
@@ -177,21 +230,29 @@ def table(assignment, rows):
     hard = assignment.get("hard_deadline") or "-"
     out = [f"### {assignment['name']}", "",
            f"soft deadline `{soft}` · hard deadline `{hard}`", "",
-           "| group | class | last push | soft | hard | repo | |",
-           "|---|---|---|---|---|---|---|"]
+           "| group | class | graded commit | received | soft | hard | repo | |",
+           "|---|---|---|---|---|---|---|---|"]
     def cell(value):
-        return {"on time": "✅ on time", "late": "⚠️ late", "-": "–"}.get(value, value)
+        return {"on time": "✅ on time", "late": "⚠️ late", "unverified": "❓ check",
+                "-": "–"}.get(value, value)
 
     for r in rows:
+        got = (f"{r['received']} ({r['via']})" if r["received"]
+               else "–" if not r["head"] else f"? (last push {r['pushed_at'] or '–'})")
         out.append(
-            f"| {r['group']} | {r.get('class') or '–'} | {r['pushed_at'] or '–'} | "
+            f"| {r['group']} | {r.get('class') or '–'} | {'`' + r['head'] + '`' if r['head'] else '–'} | "
+            f"{got} | "
             f"{cell(r['soft'])} | "
             f"{cell(r['hard'])} | `{r['repo']}` | "
             f"{r['state']}{' · ' + r['note'] if r['note'] else ''} |")
     late_soft = sum(1 for r in rows if r["soft"] == "late")
     late_hard = sum(1 for r in rows if r["hard"] == "late")
+    unverified = sum(1 for r in rows if "unverified" in (r["soft"], r["hard"]))
     out += ["", f"{len(rows)} group(s) · {late_soft} past the soft deadline · "
-                f"{late_hard} past the hard deadline"]
+                f"{late_hard} past the hard deadline"
+                + (f" · {unverified} to check by hand" if unverified else ""),
+            "", "*received* is when GitHub first got the graded commit, the head of the "
+                "default branch: a new branch or a re-push of the same work doesn't move it."]
     return "\n".join(out)
 
 
@@ -207,7 +268,7 @@ def main():
     ap.add_argument("--local", action="store_true",
                     help="read assignments/ from this checkout instead of the repo")
     ap.add_argument("--mark-late", action="store_true",
-                    help="flag commits pushed after the soft deadline, without locking")
+                    help="flag commits that reached GitHub after the soft deadline, without locking")
     ap.add_argument("--wait", type=int, default=0, metavar="MINUTES",
                     help="if a hard deadline falls within this many minutes, wait for it "
                          "and lock on the dot instead of leaving it to the next run")
@@ -263,8 +324,8 @@ def main():
 
     if args.csv:
         w = csv.DictWriter(sys.stdout, fieldnames=[
-            "assignment", "group", "class", "repo", "pushed_at", "soft", "hard",
-            "state", "note"])
+            "assignment", "group", "class", "repo", "head", "received", "via",
+            "pushed_at", "soft", "hard", "state", "note"])
         w.writeheader()
         w.writerows(all_rows)
 
