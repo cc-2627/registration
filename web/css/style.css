@@ -42,7 +42,9 @@ body {
 a { color: var(--accent); }
 code, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .88em; }
 code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
-.wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+/* Wide enough for the groups table on a laptop or monitor; text keeps its own
+   measure (the ch limits below), so lines stay readable. */
+.wrap { max-width: 1440px; margin: 0 auto; padding: 0 clamp(16px, 2.5vw, 32px); }
 nav { display: flex; align-items: center; justify-content: space-between; padding: 18px 0; gap: 16px; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.15rem; color: var(--text); text-decoration: none; }
 .brand svg { width: 28px; height: 28px; }

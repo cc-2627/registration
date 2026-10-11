@@ -58,12 +58,31 @@ export async function loadMine(token, defs) {
     let commits = [];
     try { commits = await paginate(token, `/repos/${org}/${r.name}/commits`); }
     catch (e) { if (e.status !== 409) throw e; }   // 409: still empty
-    return { r, d, commits, soft: softFor(d, classes) };
+    return { r, d, commits, soft: softFor(d, classes), graded: await gradedCommit(token, org, r, commits) };
   }));
   // In the order the assignments were released.
   const order = defs.map((d) => d.name);
   rows.sort((a, b) => order.indexOf(a.d.name) - order.indexOf(b.d.name));
   return { login: me.login, group, classes, rows };
+}
+
+// The commit that gets graded - the head of the default branch, which the commits
+// list starts with - and when GitHub first received it, from the repository's
+// activity: a server time, like the one the teacher's report uses. The earliest
+// update that set any branch to it counts, so a branch made later pointing at the
+// same work doesn't move it. null when there's nothing to grade or no record.
+async function gradedCommit(token, org, r, commits) {
+  const sha = commits[0]?.sha;
+  if (!sha) return null;
+  let acts;
+  // One page, the newest 100: the activity list pages by cursor, which paginate()
+  // doesn't follow, and the graded commit is nearly always recent.
+  try { acts = await gh(token, "GET", `/repos/${org}/${r.name}/activity?per_page=100`); }
+  catch { return { sha, at: null }; }
+  const hits = acts.filter((a) => a.after === sha && a.activity_type !== "branch_deletion")
+    .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+  const first = hits[0];
+  return { sha, at: first ? first.timestamp : null, ref: first?.ref?.replace(/^refs\/heads\//, "") };
 }
 
 // The group's classes, from the bot's reply on its registration issue, which is public.
@@ -82,7 +101,7 @@ export function renderMine(box, data, when, tz = "UTC") {
   const intro = el("p", undefined, "sub");
   intro.append(`Group ${data.group}`, data.classes.length ? `, class ${data.classes.join(" and ")}` : "", `. Seen with ${data.login}'s key.`);
   box.append(intro);
-  for (const { r, d, commits, soft } of data.rows) {
+  for (const { r, d, commits, soft, graded } of data.rows) {
     const card = el("article", undefined, "asg");
     const head = el("header");
     const [state, kind] = stateOf(d);
@@ -105,7 +124,10 @@ export function renderMine(box, data, when, tz = "UTC") {
     stat(pushed ? when(pushed) : "—", pushed ? "last push" : "nothing pushed yet");
     const open = !d.hard_deadline || Date.now() < Date.parse(d.hard_deadline);
     if (pushed && open && m.quiet >= 2) stat(m.quiet, "days since the last commit");
-    if (soft) stat(m.late, m.late === 1 ? "commit after the soft deadline" : "commits after the soft deadline");
+    // Whether it's late is a question about when the graded work arrived; commit
+    // dates are only a fallback, for when GitHub has no record of the push.
+    if (soft && graded?.at) stat(Date.parse(graded.at) <= Date.parse(soft) ? "On time" : "Late", "for your soft deadline");
+    else if (soft) stat(m.late, m.late === 1 ? "commit dated after the soft deadline" : "commits dated after the soft deadline");
     card.append(stats);
 
     if (m.started) {
@@ -124,6 +146,11 @@ export function renderMine(box, data, when, tz = "UTC") {
     const dl = el("dl", undefined, "deadlines");
     dl.append(el("dt", "Your soft deadline"), el("dd", soft ? when(soft) : "None"),
               el("dt", "Hard deadline"), el("dd", d.hard_deadline ? `${when(d.hard_deadline)} — the repository locks` : "Never locks"));
+    if (graded) {
+      dl.append(el("dt", "Your work, as graded"), el("dd", graded.at
+        ? `${graded.sha.slice(0, 7)}, the latest commit on ${r.default_branch}, reached GitHub ${when(graded.at)}${graded.ref ? ` (pushed to ${graded.ref})` : ""}`
+        : `${graded.sha.slice(0, 7)}, the latest commit on ${r.default_branch}. GitHub has no record of when it was pushed; your teacher checks these by hand.`));
+    }
     card.append(dl);
 
     if (m.started) {
@@ -139,7 +166,7 @@ export function renderMine(box, data, when, tz = "UTC") {
       }
       card.append(el("h4", "Commits by member"), list);
     }
-    card.append(el("p", "Commit times come from your own computer. Whether work is late is decided by when it was pushed, which is what your teacher sees.", "hint"));
+    card.append(el("p", `Commit times come from your own computer. Whether work is late is decided by when GitHub first received the latest commit on ${r.default_branch}, which is what your teacher sees: making another branch, or pushing the same commit again, doesn't change it. New commits pushed after a deadline do.`, "hint"));
     box.append(card);
   }
 }

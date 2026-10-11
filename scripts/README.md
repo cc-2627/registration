@@ -327,9 +327,10 @@ Two things to know:
 | **soft** | nothing is enforced. The report shows who pushed after it, so you can take off the points. |
 | **hard** | `.github/workflows/deadlines.yml` switches the team's access from write to read. Students keep seeing the repo, but can no longer push. |
 
-Lateness is measured with the repository's `pushed_at`, which GitHub sets server-side on
-every push — unlike a commit date, a student cannot backdate it. The measurement is
-therefore exact no matter when the lock lands.
+Lateness is measured on the **graded commit** — the head of the default branch — by when
+GitHub *first received* it. That time is set server-side, so unlike a commit date a student
+cannot backdate it, and the measurement is exact no matter when the lock lands. See
+[Who met which deadline](#who-met-which-deadline) for where the time comes from.
 
 **Locking to the minute.** GitHub's shortest cron interval is 5 minutes and scheduled runs
 are regularly delayed under load, so no schedule alone can lock punctually. Instead the
@@ -451,13 +452,20 @@ clones. GitHub's non-destructive equivalent is a **commit status**, and that is 
 bot sets:
 
 ```
-✗ deadline/soft — Pushed after the soft deadline - counts as late
+✗ deadline/soft — Reached GitHub after the soft deadline - counts as late (2026-11-12T01:30:52Z)
 ```
+
+"After" is the commit's first arrival on GitHub, not its commit date: a commit made on
+time and pushed late is marked, one dated late but pushed on time is not, and a commit
+with no server record of its arrival is left unmarked and counted in the report. A commit
+an earlier version of bedel marked from its date, which in fact arrived on time, gets a
+newer `success` status saying so (statuses can't be deleted, but the newest one is what
+GitHub shows).
 
 It shows next to the commit in the repo's commit list and on the commit page, so late
 work is obvious while browsing, exactly where a prefix would have been.
 
-It also creates a `soft-deadline` tag on the last commit that made it in on time, which
+It also creates a `soft-deadline` tag on the newest commit that reached GitHub on time, which
 makes the boundary usable from a terminal while marking:
 
 ```
@@ -475,8 +483,9 @@ GH_TOKEN=$(gh auth token) python scripts/deadlines.py --mark-late
 GH_TOKEN=$(gh auth token) python scripts/deadlines.py --mark-late a3
 ```
 
-That only marks, it never locks. Already-marked commits are skipped, so re-running is
-cheap and safe.
+That only marks, it never locks, and it goes through every group, not only the late ones,
+so stale marks get corrected. Already-marked commits are skipped, so re-running is cheap
+and safe.
 
 **What is evidence and what is decoration.** Anything written *into* a group repo is
 decoration: a student with push access can write commit statuses themselves (the Statuses
@@ -484,10 +493,10 @@ API needs write access, which is exactly what they have), and they own the histo
 markers and tags can be changed by them. Commit dates are no better — `git commit --date`,
 or `GIT_COMMITTER_DATE`, sets whatever you like, and a rebase rewrites dates wholesale.
 
-The evidence is the repository's `pushed_at`: GitHub stamps it on every push, it is not
-part of the repo's contents, and nobody can write it. That is the only thing the report
-uses to decide `on time` / `late`, so grade from the report — the job summary or
-`--report --csv`, both of which live where students cannot write.
+The evidence is when GitHub received each push: GitHub stamps it, it is not part of the
+repo's contents, and nobody can write it. That is the only thing the report uses to decide
+`on time` / `late`, so grade from the report — the job summary or `--report --csv`, both of
+which live where students cannot write.
 
 This is also why marking runs **at lock time** by default. Once the hard deadline drops
 the team to read-only, they can no longer write statuses, so what is stamped then stays
@@ -507,16 +516,41 @@ The same table is written to the job summary every time the deadline workflow ru
 *Run workflow* there gives you a report on demand, with a *Report without locking* tick box
 (which also skips the waiting, so it returns straight away).
 
-| group | last push | soft | hard | state |
-|---|---|---|---|---|
-| g01_61234_61789 | 2026-11-15T22:04:11+00:00 | ✅ on time | ✅ on time | read-only |
-| g02_61111_61222 | 2026-11-19T01:30:52+00:00 | ⚠️ late | ✅ on time | read-only |
+| group | graded commit | received | soft | hard | state |
+|---|---|---|---|---|---|
+| g01_61234_61789 | `3b997e0` | 2026-11-15T22:04:11+00:00 (push to main by alice) | ✅ on time | ✅ on time | read-only |
+| g02_61111_61222 | `602751a` | 2026-11-19T01:30:52+00:00 (push to main by bob) | ⚠️ late | ✅ on time | read-only |
+| g03_61333_61444 | `e7bde44` | ? (last push 2026-11-19T09:12:40+00:00) | ❓ check | ✅ on time | read-only |
+
+**What is measured.** The *graded commit* is the head of the repository's default branch,
+and *received* is the first time GitHub got it, taken from the push archive below and,
+for whatever the archive hasn't copied yet, GitHub's Activity API. It is the *first* time
+on purpose. The repository's own `pushed_at`, which earlier versions used, moves on any
+update to any ref, so all of these looked late by it while the graded work was on time:
+
+- creating a branch after the deadline — say `main`, next to the `master` the work was
+  pushed to — even though it points at the same commit;
+- pushing the same commit again, or to another branch;
+- pushing late work and force-pushing it away again, back to the on-time commit.
+
+The report notes each such case (`pushed again at …, but main still holds the commit
+received on time`) so you can look. New work pushed after a deadline is a new commit,
+first received then, so it is late as before.
+
+**`❓ check`** means GitHub kept no record of when the graded commit arrived (the Events
+API drops pushes, and the Activity API only lists ref updates) *and* the repository was
+pushed to after the deadline, so it can't be settled either way. It is never counted as
+late; look in the push archive, or ask the group. If the repository wasn't pushed to at
+all after the deadline, the group is on time whatever the records say: `pushed_at` is the
+latest any commit can have arrived.
+
+An empty repository has nothing to grade, and the report says `empty`.
 
 ### The push archive
 
 `pushed_at` says when a repository was *last* pushed to — one fact per repo, overwritten
 by the next push. For the per-push record, `scripts/pushlog.py` copies GitHub's Events
-API into **`<org>/push-log`**, a private repository created on first use, laid out one
+and Activity APIs into **`<org>/push-log`**, a private repository created on first use, laid out one
 file per group per assignment:
 
 ```
@@ -532,7 +566,11 @@ One row per commit, carrying the push that delivered it and the commit message:
 | `pushed_at` | when GitHub received the push — **server-set, cannot be faked** |
 | `actor` | which member pushed |
 | `sha`, `message`, `author`, `committed_at` | the commit, as the commit says it is |
-| `source` | `push` if an event recorded it, `commit-scan` if only the sweep saw it |
+| `source` | `push` or `activity` for the API that recorded it, `commit-scan` if only the sweep saw it |
+| `kind` | `push`, `force_push`, `branch_creation`, `pr_merge`, … |
+
+Each commit has one row: its **first** server-stamped arrival. A later push of the same
+commit — a new branch, a re-push — never replaces it, and an earlier one found later does.
 
 ```bash
 GH_TOKEN=$(gh auth token) python scripts/pushlog.py --show a3 > a3-pushes.csv
@@ -543,8 +581,9 @@ a deadline, and with `continue-on-error` so a failed archive can never stop a lo
 costs nothing: the archive repo runs no Actions of its own, and the job writing to it runs
 in this public repository.
 
-**Why there are two sources.** The Events API is the only place GitHub stamps a per-push
-time itself, but it is lossy — measured on this org, four of five web-editor commits in
+**Why there are three sources.** The Events and Activity APIs are where GitHub stamps a
+per-push time itself. The Activity API lists every ref update with its kind, and goes
+further back; the Events API is lossy — measured on this org, four of five web-editor commits in
 one repository produced no event at all, and another repository produced none whatsoever.
 So each run also sweeps the commits API, and anything the events missed is archived with
 `source=commit-scan` and an empty `pushed_at`, because the only time available for it is
@@ -553,7 +592,7 @@ the commit's own, which the client sets and can therefore lie about.
 The result is a complete record of commits, of which the `source=push` rows additionally
 carry a trustworthy arrival time. It survives what the group repo does not — rewritten
 history, deleted branches, a deleted repo — because it is a different repository students
-cannot reach. It does not replace `pushed_at`, which is still what the report grades on.
+cannot reach. It is what the report grades on.
 
 ### Extensions
 

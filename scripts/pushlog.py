@@ -10,10 +10,17 @@ so it has to be copied somewhere durable while it is still there. This does that
 copy. Run it often enough (the deadlines workflow runs it every 30 minutes) and
 the archive is complete even though the source expires.
 
+It also copies the Activity API, which lists every ref update - pushes,
+force-pushes, new branches, merges - with its kind, and misses what the Events API
+drops. Between them, a commit's first arrival is known far more often than from
+either alone.
+
 Laid out as pushes/<assignment>/<group>.csv in <org>/push-log, private, created
 on first run. One row per commit, carrying the push that delivered it, so a row
 says both when the server received the work and what the work said it was. Rows
-are keyed by (event id, sha), so re-running is free and never duplicates.
+are keyed by sha and keep the commit's *first* server-stamped arrival, so
+re-running is free, never duplicates, and a later branch creation or re-push of
+the same commit never makes it look late.
 """
 import argparse
 import csv
@@ -21,14 +28,12 @@ import io
 import os
 import sys
 
+from arrival import ACTIVITY, FIELDS, ZERO, activity_rows, earlier, read_rows
 from ghlib import (GitHub, GitHubError, commit_files, default_org, ensure_repo,
                    get_file, load_assignments, load_groups, repo_name)
 
 ORG = default_org()
 REPO = os.environ.get("REPO")   # "owner/name"; set by the workflow
-FIELDS = ["pushed_at", "assignment", "group", "repo", "actor", "ref", "sha",
-          "message", "author", "committed_at", "source", "event_id"]
-ZERO = "0" * 40
 
 
 def push_commits(gh, org, repo, before, head):
@@ -71,6 +76,8 @@ def push_events(gh, org, repo, assignment, group):
             "ref": payload.get("ref") or "",
             "source": "push",
             "event_id": e["id"],
+            # A PushEvent doesn't say; a push from nothing is a new branch.
+            "kind": "branch_creation" if payload.get("before") in (None, "", ZERO) else "push",
         }
         commits = push_commits(gh, org, repo, payload.get("before"), payload.get("head"))
         if not commits:
@@ -121,6 +128,7 @@ def commit_scan(gh, org, repo, assignment, group, limit=100):
             "committed_at": (info.get("author") or {}).get("date", ""),
             "source": "commit-scan",
             "event_id": "",
+            "kind": "",
         })
     return rows
 
@@ -140,14 +148,7 @@ def existing(gh, org, log_repo, path):
     any one version of this script, so a file written before a column existed
     still has to read back cleanly."""
     raw = get_file(gh, org, log_repo, path)
-    if not raw:
-        return []
-    rows = []
-    for r in csv.DictReader(io.StringIO(raw.decode())):
-        row = {f: (r.get(f) or "") for f in FIELDS}
-        row["source"] = row["source"] or ("push" if row["event_id"] else "commit-scan")
-        rows.append(row)
-    return rows
+    return read_rows(raw) if raw else []
 
 
 def key(row):
@@ -157,9 +158,12 @@ def key(row):
 
 
 def merge(old, new):
-    """Old rows win, with one exception: a push event supersedes a row the commit
-    sweep found first, because the push carries a server timestamp and the sweep
-    has only the client's. Nothing already written is otherwise revised."""
+    """One row per commit: its first server-stamped arrival.
+
+    A row with a server time supersedes one the commit sweep found first, which
+    has only the client's; of two server times the earlier wins, because that is
+    when the work actually arrived. A later push of the same sha - a new branch
+    pointing at it, the same commit re-pushed - never replaces it."""
     rows = {key(r): r for r in old}
     pushes, commits = set(), 0
     for r in new:
@@ -170,7 +174,7 @@ def merge(old, new):
             commits += 1
             if r["event_id"]:
                 pushes.add(r["event_id"])
-        elif r["event_id"] and not cur["event_id"]:
+        elif earlier(r, cur):
             rows[k] = r
             pushes.add(r["event_id"])
     return list(rows.values()), len(pushes), commits
@@ -220,9 +224,13 @@ def main():
             if rows is None:
                 missing += 1
                 continue
-            rows += commit_scan(gh, ORG, repo, a["name"], g["name"])
             path = f"pushes/{a['name']}/{g['name']}.csv"
-            old = [] if args.dry_run else existing(gh, ORG, args.log_repo, path)
+            old = existing(gh, ORG, args.log_repo, path)
+            # Activity entries already copied are skipped: their commits are known.
+            seen = {r["event_id"] for r in old if r["event_id"].startswith(ACTIVITY)}
+            branch = (gh.get(f"/repos/{ORG}/{repo}") or {}).get("default_branch")
+            rows += activity_rows(gh, ORG, repo, a["name"], g["name"], branch, seen) or []
+            rows += commit_scan(gh, ORG, repo, a["name"], g["name"])
             merged, pushes, commits = merge(old, rows)
             if pushes or commits:
                 changed[path] = render(merged)
