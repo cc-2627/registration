@@ -332,6 +332,20 @@ GitHub *first received* it. That time is set server-side, so unlike a commit dat
 cannot backdate it, and the measurement is exact no matter when the lock lands. See
 [Who met which deadline](#who-met-which-deadline) for where the time comes from.
 
+**A grace period students don't see.** Set the `GRACE_MINUTES` secret and work that
+arrives up to that many minutes after a deadline still counts as on time, in the report and
+in the commit marks:
+
+```
+gh secret set GRACE_MINUTES -R ORG/registration --body 5
+```
+
+It is a secret rather than part of `assignments/`, which is public, so students see
+their deadlines exactly as set and nothing on the course page mentions any slack. Their
+own page still calls work a minute past the deadline late. It only changes the verdicts:
+repositories lock at the hard deadline itself. Run the report locally with
+`GRACE_MINUTES=5` to match the workflow. Delete the secret to go back to none.
+
 **Locking to the minute.** GitHub's shortest cron interval is 5 minutes and scheduled runs
 are regularly delayed under load, so no schedule alone can lock punctually. Instead the
 workflow runs every 30 minutes and, when a hard deadline falls within the next 35, the run

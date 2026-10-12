@@ -66,4 +66,5 @@ jobs:
           ORG: ${{ github.repository_owner }}
           REPO: ${{ github.repository }}
           CLASSES: ${{ secrets.CLASSES }}
+          GRACE_MINUTES: ${{ secrets.GRACE_MINUTES }}
           ADMIN_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
