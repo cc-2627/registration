@@ -26,6 +26,7 @@ import argparse
 import csv
 import datetime
 import os
+import re
 import sys
 import time
 
@@ -42,7 +43,12 @@ LOG_REPO = os.environ.get("LOG_REPO", "push-log")
 # secret, not in assignments/, because the registration repo is public: students
 # see their deadlines as set and never learn there is any slack. It changes the
 # verdicts only; repositories still lock on the dot.
-GRACE = datetime.timedelta(minutes=float(os.environ.get("GRACE_MINUTES") or 0))
+#
+# Write it with its unit - "5 minutes", not "5": Actions masks a secret's value
+# wherever it appears in a log, and a bare digit would be starred out of every
+# date and group number the run prints.
+_grace = re.match(r"\s*(\d+(?:\.\d+)?)", os.environ.get("GRACE_MINUTES") or "")
+GRACE = datetime.timedelta(minutes=float(_grace.group(1)) if _grace else 0)
 OPEN_PERMISSION = "push"
 LOCKED_PERMISSION = "pull"
 LATE_CONTEXT = "deadline/soft"

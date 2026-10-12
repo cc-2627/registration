@@ -337,8 +337,11 @@ arrives up to that many minutes after a deadline still counts as on time, in the
 in the commit marks:
 
 ```
-gh secret set GRACE_MINUTES -R ORG/registration --body 5
+gh secret set GRACE_MINUTES -R ORG/registration --body "5 minutes"
 ```
+
+Keep the unit in the value. Actions stars out a secret's value wherever it appears in a
+log, so a bare `5` would turn every 5 in the run's dates and group numbers into `***`.
 
 It is a secret rather than part of `assignments/`, which is public, so students see
 their deadlines exactly as set and nothing on the course page mentions any slack. Their
