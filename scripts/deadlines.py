@@ -3,7 +3,10 @@
 
 In GitHub Actions (see .github/workflows/deadlines.yml) it runs with no
 arguments: every assignment whose hard deadline has passed has its group
-repositories switched to read-only, and a table goes into the job summary.
+repositories switched to read-only. The registration repo is public, and so are
+its Actions logs and job summaries, so the job summary gets counts only; the
+full table, with every group's name and verdict, goes to the private push-log
+repo as reports/<assignment>.md.
 
 Locally:
     GH_TOKEN=$(gh auth token) ORG=myorg python scripts/deadlines.py --report
@@ -32,13 +35,15 @@ import time
 
 import rules
 from arrival import arrivals, describe, head_of, verdict
-from ghlib import (GitHub, GitHubError, default_org, grant_team, iso_z,
-                   load_assignments, load_claims, load_groups, load_classes, now,
+from ghlib import (GitHub, GitHubError, commit_files, default_org, get_file,
+                   grant_team, iso_z, load_assignments, load_claims, load_groups, load_classes, now,
                    repo_name, resolve_soft, team_permission, to_dt)
 
 ORG = default_org()
 REPO = os.environ.get("REPO")   # "owner/name"; set by the workflow
 LOG_REPO = os.environ.get("LOG_REPO", "push-log")
+# In Actions everything printed is public (see the docstring): no group names.
+IN_ACTIONS = os.environ.get("GITHUB_ACTIONS") == "true"
 # Minutes of slack after every deadline before work counts as late. It lives in a
 # secret, not in assignments/, because the registration repo is public: students
 # see their deadlines as set and never learn there is any slack. It changes the
@@ -237,6 +242,29 @@ def wait_for_deadline(assignments, minutes):
     time.sleep(delay)
 
 
+def counts(rows):
+    late_soft = sum(1 for r in rows if r["soft"] == "late")
+    late_hard = sum(1 for r in rows if r["hard"] == "late")
+    unverified = sum(1 for r in rows if "unverified" in (r["soft"], r["hard"]))
+    return (f"{len(rows)} group(s) · {late_soft} past the soft deadline · "
+            f"{late_hard} past the hard deadline"
+            + (f" · {unverified} to check by hand" if unverified else ""))
+
+
+def publish_reports(gh, tables):
+    """Write each assignment's full table to the private push-log repo, in one
+    commit, and only what changed: the workflow runs every half hour."""
+    changed = {}
+    for name, text in tables.items():
+        path, data = f"reports/{name}.md", (text + "\n").encode()
+        if get_file(gh, ORG, LOG_REPO, path) != data:
+            changed[path] = data
+    if changed:
+        commit_files(gh, ORG, LOG_REPO, changed,
+                     f"Update deadline report for {', '.join(sorted(tables))}")
+    return f"https://github.com/{ORG}/{LOG_REPO}/tree/HEAD/reports"
+
+
 def table(assignment, rows):
     by_class = assignment.get("soft_by_class") or {}
     soft = (", ".join(f"{t} {w}" for t, w in sorted(by_class.items()))
@@ -259,13 +287,7 @@ def table(assignment, rows):
             f"{cell(r['soft'])} | "
             f"{cell(r['hard'])} | `{r['repo']}` | "
             f"{r['state']}{' · ' + r['note'] if r['note'] else ''} |")
-    late_soft = sum(1 for r in rows if r["soft"] == "late")
-    late_hard = sum(1 for r in rows if r["hard"] == "late")
-    unverified = sum(1 for r in rows if "unverified" in (r["soft"], r["hard"]))
-    out += ["", f"{len(rows)} group(s) · {late_soft} past the soft deadline · "
-                f"{late_hard} past the hard deadline"
-                + (f" · {unverified} to check by hand" if unverified else ""),
-            "", "*received* is when GitHub first got the graded commit, the head of the "
+    out += ["", counts(rows), "", "*received* is when GitHub first got the graded commit, the head of the "
                 "default branch: a new branch or a re-push of the same work doesn't move it."]
     return "\n".join(out)
 
@@ -315,7 +337,7 @@ def main():
     classes = load_classes()
     claims = load_claims(gh, source) if source else {}
 
-    sections, all_rows = [], []
+    sections, all_rows, public = [], [], []
     for a in assignments:
         rows = []
         for g in groups:
@@ -329,6 +351,9 @@ def main():
             r["assignment"] = a["name"]
         all_rows += rows
         sections.append(table(a, rows))
+        public.append(f"### {a['name']}\n\n{counts(rows)}")
+        if IN_ACTIONS:
+            continue
         for r in rows:
             # With --csv, stdout belongs to the CSV alone, or the file it is
             # redirected into opens as neither one thing nor the other.
@@ -344,9 +369,17 @@ def main():
         w.writerows(all_rows)
 
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not IN_ACTIONS:
+        if summary:
+            with open(summary, "a", encoding="utf-8") as f:
+                f.write("\n\n".join(sections) + "\n")
+        return
+    where = publish_reports(gh, {a["name"]: t for a, t in zip(assignments, sections)})
+    print("\n\n".join(public))
     if summary:
         with open(summary, "a", encoding="utf-8") as f:
-            f.write("\n\n".join(sections) + "\n")
+            f.write("\n\n".join(public)
+                    + f"\n\nThe full table, with each group, is in the private [push-log reports]({where}).\n")
 
 
 if __name__ == "__main__":
