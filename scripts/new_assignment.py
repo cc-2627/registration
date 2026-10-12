@@ -39,7 +39,7 @@ import sys
 import rules
 from ghlib import (ASSIGNMENT_RE, GitHub, GitHubError, assignments_dir, clone_history,
                    commit_files, default_org, ensure_repo, get_file, grant_team,
-                   have_git, load_groups, load_classes, parse_deadline, push_folder,
+                   have_git, load_assignments, load_groups, load_classes, parse_deadline, push_folder,
                    push_own_work, put_file, repo_empty, repo_files, repo_name,
                    repo_paths, resolve_soft, to_dt)
 
@@ -55,8 +55,11 @@ def announce(gh, org, repo, name, group, definition, carried=None, replaced=(),
     The marker makes it idempotent: re-running never posts a second time.
     """
     marker = f"<!-- registration-bot:assignment:{name} -->"
+    # A renamed assignment was announced under its earlier name: that counts.
+    known = [marker] + [f"<!-- registration-bot:assignment:{n} -->"
+                        for n in definition.get("renamed_from") or ()]
     for i in gh.paginate(f"/repos/{org}/{repo}/issues?state=all"):
-        if marker in (i.get("body") or ""):
+        if any(m in (i.get("body") or "") for m in known):
             return False
 
     when = []
@@ -287,6 +290,14 @@ def main():
         raw = get_file(gh, args.org, args.repo, path)
         if raw:
             existing = json.loads(raw)
+    if not existing and not args.local_only:
+        # A former name keeps working as a redirect to the renamed repositories, for
+        # the students' clones; a new assignment by that name would take it over.
+        for other in load_assignments(gh, f"{args.org}/{args.repo}"):
+            if name in (other.get("renamed_from") or ()):
+                sys.exit(f"{name} was renamed to {other['name']}, and its old repository "
+                         f"names still redirect there for the students' clones. Pick "
+                         f"another name, or change {other['name']} instead.")
     if not existing:
         missing = []
         if not soft_week and not soft_given:
@@ -393,6 +404,10 @@ def main():
     }
     if own_work:
         definition["own_work"] = True
+    # Kept across edits: it stops a former name being reused, and stops groups being
+    # announced to a second time under the new one (rename_assignment.py).
+    if existing.get("renamed_from"):
+        definition["renamed_from"] = existing["renamed_from"]
     data = (json.dumps(definition, indent=2) + "\n").encode()
     if args.local_only:
         os.makedirs(assignments_dir(), exist_ok=True)
