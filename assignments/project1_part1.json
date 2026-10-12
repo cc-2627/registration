@@ -1,5 +1,5 @@
 {
-  "name": "project_1",
+  "name": "project1_part1",
   "template": null,
   "soft_week": "2026-10-02",
   "soft_time": "23:59",
@@ -8,5 +8,8 @@
   "soft_deadline": "2026-10-08T23:59:00+01:00",
   "hard_deadline": "2026-11-02T23:59:00+00:00",
   "created": "2026-10-02T21:12:04+00:00",
-  "own_work": true
+  "own_work": true,
+  "renamed_from": [
+    "project_1"
+  ]
 }
