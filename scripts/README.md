@@ -512,7 +512,7 @@ or `GIT_COMMITTER_DATE`, sets whatever you like, and a rebase rewrites dates who
 
 The evidence is when GitHub received each push: GitHub stamps it, it is not part of the
 repo's contents, and nobody can write it. That is the only thing the report uses to decide
-`on time` / `late`, so grade from the report — the job summary or `--report --csv`, both of
+`on time` / `late`, so grade from the report — `reports/` in the push-log repo or `--report --csv`, both of
 which live where students cannot write.
 
 This is also why marking runs **at lock time** by default. Once the hard deadline drops
@@ -528,10 +528,12 @@ GH_TOKEN=$(gh auth token) python scripts/deadlines.py --report
 GH_TOKEN=$(gh auth token) python scripts/deadlines.py --report a3 --csv > a3.csv
 ```
 
-The same table is written to the job summary every time the deadline workflow runs — open
-*Actions → Assignment deadlines → (latest run)* to read it without leaving the browser.
-*Run workflow* there gives you a report on demand, with a *Report without locking* tick box
-(which also skips the waiting, so it returns straight away).
+The same table is written to the private push-log repo, as `reports/<assignment>.md`,
+every time the deadline workflow runs, in a commit only when something changed. The run's
+own job summary and log show counts only: the registration repo is public, and so are its
+Actions runs, and a group's name holds its students' numbers.
+*Actions → Assignment deadlines → Run workflow* gives you a report on demand, with a
+*Report without locking* tick box (which also skips the waiting, so it returns straight away).
 
 | group | graded commit | received | soft | hard | state |
 |---|---|---|---|---|---|
