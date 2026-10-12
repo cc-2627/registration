@@ -38,6 +38,11 @@ from ghlib import (GitHub, GitHubError, default_org, grant_team, iso_z,
 ORG = default_org()
 REPO = os.environ.get("REPO")   # "owner/name"; set by the workflow
 LOG_REPO = os.environ.get("LOG_REPO", "push-log")
+# Minutes of slack after every deadline before work counts as late. It lives in a
+# secret, not in assignments/, because the registration repo is public: students
+# see their deadlines as set and never learn there is any slack. It changes the
+# verdicts only; repositories still lock on the dot.
+GRACE = datetime.timedelta(minutes=float(os.environ.get("GRACE_MINUTES") or 0))
 OPEN_PERMISSION = "push"
 LOCKED_PERMISSION = "pull"
 LATE_CONTEXT = "deadline/soft"
@@ -133,6 +138,9 @@ def status(gh, org, group, assignment, soft=None, notes=(), class_="",
     name = assignment["name"]
     repo = repo_name(group["name"], name)
     hard = to_dt(assignment.get("hard_deadline"))
+    # Lateness is judged against the deadlines plus the grace; locking uses `hard`.
+    soft_by = soft + GRACE if soft else None
+    hard_by = hard + GRACE if hard else None
     row = {
         "group": group["name"], "repo": repo, "pushed_at": None, "class": class_,
         "head": "", "received": "", "via": "",
@@ -159,11 +167,11 @@ def status(gh, org, group, assignment, soft=None, notes=(), class_="",
         row["head"] = head[:7]
         row["received"] = received.isoformat() if received else ""
         row["via"] = describe(got) if got else ""
-        row["soft"] = verdict(soft, received, pushed)
-        row["hard"] = verdict(hard, received, pushed)
+        row["soft"] = verdict(soft_by, received, pushed)
+        row["hard"] = verdict(hard_by, received, pushed)
         if received and pushed and pushed - received > datetime.timedelta(minutes=1) \
-                and (row["soft"] == "on time" and soft and pushed > soft
-                     or row["hard"] == "on time" and hard and pushed > hard):
+                and (row["soft"] == "on time" and soft_by and pushed > soft_by
+                     or row["hard"] == "on time" and hard_by and pushed > hard_by):
             # A new branch, a re-push, or late work force-pushed away again: the
             # archive says which. What is graded is still the on-time commit.
             row["note"] = add_note(row["note"], f"pushed again at {row['pushed_at']}, but {branch} "
@@ -193,11 +201,11 @@ def status(gh, org, group, assignment, soft=None, notes=(), class_="",
         row["state"] = "read-only"
         row["note"] = add_note(row["note"], "locked now")
         # The history is final the moment it is locked, so mark it once, here.
-        row["note"] = marked_note(row["note"], *mark_late_commits(gh, org, repo, soft, branch, first))
+        row["note"] = marked_note(row["note"], *mark_late_commits(gh, org, repo, soft_by, branch, first))
     elif mark and soft and head:
         # Every group, not just the late ones: an on-time group may carry marks an
         # earlier version set from commit dates, and this is what corrects them.
-        row["note"] = marked_note(row["note"], *mark_late_commits(gh, org, repo, soft, branch, first))
+        row["note"] = marked_note(row["note"], *mark_late_commits(gh, org, repo, soft_by, branch, first))
     return row
 
 
