@@ -573,17 +573,18 @@ def push_folder(gh, org, repo, folder, message):
     return len(tree)
 
 
-def commit_files(gh, org, repo, files, message, modes=None):
+def commit_files(gh, org, repo, files, message, modes=None, delete=()):
     """Create or update several files in one commit, leaving the rest of the tree
     alone. `files` is {repo path: bytes}, `modes` an optional {repo path: git mode}
-    for anything that is not a plain file. Returns the commit sha, or None if there
-    was nothing to write.
+    for anything that is not a plain file, `delete` paths to remove in the same
+    commit. Returns the commit sha, or None if there was nothing to write.
 
     Unlike push_folder this builds on the current tree instead of replacing it, so
     it is safe on a repository that holds history worth keeping.
     """
     files = {k: v for k, v in files.items() if v is not None}
-    if not files:
+    delete = [p for p in delete if p not in files]
+    if not files and not delete:
         return None
 
     info = gh.get(f"/repos/{org}/{repo}")
@@ -603,6 +604,8 @@ def commit_files(gh, org, repo, files, message, modes=None):
                        {"content": base64.b64encode(raw).decode(), "encoding": "base64"})
         tree.append({"path": path, "mode": (modes or {}).get(path, "100644"),
                      "type": "blob", "sha": blob["sha"]})
+    # A null sha removes the path from the base tree.
+    tree += [{"path": p, "mode": "100644", "type": "blob", "sha": None} for p in delete]
 
     body = {"tree": tree}
     if base_tree:

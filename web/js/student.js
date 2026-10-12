@@ -101,7 +101,8 @@ export function renderMine(box, data, when, tz = "UTC") {
   const intro = el("p", undefined, "sub");
   intro.append(`Group ${data.group}`, data.classes.length ? `, class ${data.classes.join(" and ")}` : "", `. Seen with ${data.login}'s key.`);
   box.append(intro);
-  for (const { r, d, commits, soft, graded } of data.rows) {
+  for (const row of data.rows) {
+    const { r, d, commits, soft, graded } = row;
     const card = el("article", undefined, "asg");
     const head = el("header");
     const [state, kind] = stateOf(d);
@@ -111,6 +112,19 @@ export function renderMine(box, data, when, tz = "UTC") {
     const meta = el("p", undefined, "hint");
     meta.append(linkTo(r.html_url, r.name));
     card.append(meta);
+
+    // Work landing here after the deadline while a later assignment is open is,
+    // more often than not, that assignment's work pushed to the wrong place.
+    const next = soft && graded?.at && Date.parse(graded.at) > Date.parse(soft)
+      && data.rows.find((o) => o !== row && Date.parse(o.d.created || o.r.created_at) > Date.parse(d.created || r.created_at)
+        && (!o.d.hard_deadline || Date.now() < Date.parse(o.d.hard_deadline)));
+    if (next) {
+      const warn = el("p", undefined, "callout");
+      warn.append(`New work reached this repository after its deadline. If it's for ${next.d.name}, it belongs in `,
+        linkTo(next.r.html_url, next.r.name),
+        `, where it doesn't count against ${d.name}. Your teacher can tell you how to move it.`);
+      card.append(warn);
+    }
 
     const pushed = r.pushed_at && Date.parse(r.pushed_at) - Date.parse(r.created_at) > 60000 ? r.pushed_at : null;
     const dated = commits.map((c) => ({ at: Date.parse(c.commit.committer?.date || c.commit.author?.date),

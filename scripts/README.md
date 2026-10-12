@@ -611,6 +611,51 @@ carry a trustworthy arrival time. It survives what the group repo does not — r
 history, deleted branches, a deleted repo — because it is a different repository students
 cannot reach. It is what the report grades on.
 
+### Renaming an assignment
+
+```
+GH_TOKEN=$(gh auth token) python scripts/rename_assignment.py project_1 project1_part1          # says what it would do
+GH_TOKEN=$(gh auth token) python scripts/rename_assignment.py project_1 project1_part1 --yes    # does it
+```
+
+Every group's `<group>-project_1` becomes `<group>-project1_part1`, the push archive
+follows, and `assignments/project_1.json` becomes `assignments/project1_part1.json`.
+Students don't have to do anything. GitHub redirects a renamed repository's old name for
+the web, the API and git, so their clones keep pushing and pulling through the old URL.
+The only difference they see is the new name, plus a two-line note from GitHub on each
+push (`This repository moved. Please use the new location`). History, issues, commit
+statuses, tags, team access and locks belong to the repository and move with it. Nothing
+is posted and nobody is emailed.
+
+The redirect lasts until something is created under the old name, so the definition
+records it in `renamed_from` and `new_assignment.py` refuses to reuse it. Renaming back
+is the same command the other way round. Assignments are renamed one at a time; a run
+that stops halfway finishes when run again.
+
+### Work pushed to the wrong assignment
+
+Groups working on a second part sometimes keep pushing to the first part's repository.
+That makes the first part late and leaves the second empty. To find them:
+
+```
+GH_TOKEN=$(gh auth token) python scripts/misplaced_work.py project1_part1 project1_part2
+```
+
+This lists every group whose `project1_part1` holds work GitHub received after its soft
+deadline, on the default branch or any other, with the last commit that arrived on time.
+Groups that have already moved their work and reset the repository aren't listed. With
+`--yes`, it opens one issue in each listed group's repository, @-mentioning the members,
+with the exact commands to:
+- copy the work to `project1_part2`;
+- reset `project1_part1` to its on-time commit and force-push it.
+
+Re-running never posts twice. Once that commit is the head of the default branch again,
+the report grades the group on time, because grading goes by when that commit arrived.
+Late fixes to part 1 look the same from here, so the issue asks rather than tells.
+
+A student's own page shows the same warning on any repository that got new work after
+its deadline while a later assignment is open.
+
 ### Extensions
 
 ```
