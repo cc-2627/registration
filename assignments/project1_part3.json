@@ -3,12 +3,8 @@
   "template": null,
   "soft_week": "2026-10-16",
   "soft_time": "23:59",
-  "soft_manual": false,
-  "soft_by_class": {
-    "P1": "2026-10-20T23:59:00+01:00",
-    "P2": "2026-10-22T23:59:00+01:00",
-    "P3": "2026-10-20T23:59:00+01:00"
-  },
+  "soft_manual": true,
+  "soft_by_class": {},
   "soft_deadline": "2026-10-22T23:59:00+01:00",
   "hard_deadline": "2026-11-02T23:59:00+00:00",
   "created": "2026-10-14T12:16:54+00:00",
