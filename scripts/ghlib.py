@@ -15,6 +15,13 @@ import zoneinfo
 
 API = "https://api.github.com"
 
+# Who the scripts' commits are by. Left to the API, every commit would be the
+# token owner's, and the archive alone makes dozens a day - all on the teacher's
+# profile and contribution graph. This address is the github-actions bot's, so
+# GitHub shows its avatar and counts the commits as nobody's.
+BOT = {"name": os.environ.get("BOT_NAME") or "bedel",
+       "email": os.environ.get("BOT_EMAIL") or "41898282+github-actions[bot]@users.noreply.github.com"}
+
 # Team names look like g07_61234_61789
 TEAM_RE = re.compile(r"^g(\d+)_(\d+(?:_\d+)*)$")
 
@@ -563,7 +570,8 @@ def push_folder(gh, org, repo, folder, message):
 
     new_tree = gh.post(f"/repos/{org}/{repo}/git/trees", {"tree": tree})
     commit = gh.post(f"/repos/{org}/{repo}/git/commits",
-                     {"message": message, "tree": new_tree["sha"], "parents": parents})
+                     {"message": message, "tree": new_tree["sha"], "parents": parents,
+                      "author": BOT, "committer": BOT})
     if ref is None:
         gh.post(f"/repos/{org}/{repo}/git/refs",
                 {"ref": f"refs/heads/{branch}", "sha": commit["sha"]})
@@ -612,7 +620,8 @@ def commit_files(gh, org, repo, files, message, modes=None, delete=()):
         body["base_tree"] = base_tree
     new_tree = gh.post(f"/repos/{org}/{repo}/git/trees", body)
     commit = gh.post(f"/repos/{org}/{repo}/git/commits",
-                     {"message": message, "tree": new_tree["sha"], "parents": parents})
+                     {"message": message, "tree": new_tree["sha"], "parents": parents,
+                      "author": BOT, "committer": BOT})
     if ref is None:
         gh.post(f"/repos/{org}/{repo}/git/refs",
                 {"ref": f"refs/heads/{branch}", "sha": commit["sha"]})
@@ -738,7 +747,8 @@ def get_file(gh, org, repo, path, branch=None):
 def put_file(gh, org, repo, path, data, message, branch=None):
     """Create or update one file in a single commit. Returns the commit, or None
     if the file was already byte-identical."""
-    body = {"message": message, "content": base64.b64encode(data).decode()}
+    body = {"message": message, "content": base64.b64encode(data).decode(),
+            "author": BOT, "committer": BOT}
     if branch:
         body["branch"] = branch
     url = f"/repos/{org}/{repo}/contents/{path}" + (f"?ref={branch}" if branch else "")

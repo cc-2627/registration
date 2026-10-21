@@ -570,7 +570,10 @@ An empty repository has nothing to grade, and the report says `empty`.
 ### The push archive
 
 `pushed_at` says when a repository was *last* pushed to — one fact per repo, overwritten
-by the next push. For the per-push record, `scripts/pushlog.py` copies GitHub's Events
+by the next push. The archive uses it only to skip work: `last-read.json` keeps each
+repo's `pushed_at` as of the last run that read it, and a run reads only the repos pushed
+to since. One pushed to in the last 15 minutes is read again next run, since the Events
+API can lag a push. For the per-push record, `scripts/pushlog.py` copies GitHub's Events
 and Activity APIs into **`<org>/push-log`**, a private repository created on first use, laid out one
 file per group per assignment:
 

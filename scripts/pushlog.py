@@ -24,16 +24,22 @@ the same commit never makes it look late.
 """
 import argparse
 import csv
+import datetime
 import io
+import json
 import os
 import sys
 
 from arrival import ACTIVITY, FIELDS, ZERO, activity_rows, earlier, read_rows
 from ghlib import (GitHub, GitHubError, commit_files, default_org, ensure_repo,
-                   get_file, load_assignments, load_groups, repo_name)
+                   get_file, load_assignments, load_groups, repo_name, to_dt)
 
 ORG = default_org()
 REPO = os.environ.get("REPO")   # "owner/name"; set by the workflow
+SEEN_PATH = "last-read.json"
+# The Events API can lag a push by a few minutes. A repo pushed to more recently
+# than this is read again next run, so a late event isn't skipped for good.
+SETTLE = datetime.timedelta(minutes=15)
 
 
 def push_commits(gh, org, repo, before, head):
@@ -52,6 +58,11 @@ def push_commits(gh, org, repo, before, head):
         if e.status in (404, 422):
             return []
         raise
+
+
+def org_pushes(gh, org):
+    """{repo name: when it was last pushed to} for every repo in the org."""
+    return {r["name"]: r.get("pushed_at") or "" for r in gh.paginate(f"/orgs/{org}/repos?per_page=100")}
 
 
 def push_events(gh, org, repo, assignment, group):
@@ -216,10 +227,22 @@ def main():
     if not args.dry_run and ensure_repo(gh, ORG, args.log_repo):
         print(f"created {ORG}/{args.log_repo} (private)")
 
-    changed, added, added_commits, missing = {}, 0, 0, 0
+    # One listing of the org says when every repo was last pushed to; a repo
+    # whose time hasn't moved since a run that read it has nothing new to copy.
+    pushed = org_pushes(gh, ORG)
+    last_read = json.loads(get_file(gh, ORG, args.log_repo, SEEN_PATH) or b"{}")
+    now_read = dict(last_read)
+    settled = datetime.datetime.now(datetime.timezone.utc) - SETTLE
+    changed, added, added_commits, missing, skipped = {}, 0, 0, 0, 0
     for a in assignments:
         for g in groups:
             repo = repo_name(g["name"], a["name"])
+            if repo not in pushed:
+                missing += 1
+                continue
+            if pushed[repo] and last_read.get(repo) == pushed[repo]:
+                skipped += 1
+                continue
             rows = push_events(gh, ORG, repo, a["name"], g["name"])
             if rows is None:
                 missing += 1
@@ -232,6 +255,8 @@ def main():
             rows += activity_rows(gh, ORG, repo, a["name"], g["name"], branch, seen) or []
             rows += commit_scan(gh, ORG, repo, a["name"], g["name"])
             merged, pushes, commits = merge(old, rows)
+            if pushed[repo] and to_dt(pushed[repo]) < settled:
+                now_read[repo] = pushed[repo]
             if pushes or commits:
                 changed[path] = render(merged)
                 added += pushes
@@ -241,16 +266,21 @@ def main():
 
     if missing:
         print(f"({missing} repo(s) not reachable - deleted or not created yet)")
+    if skipped:
+        print(f"({skipped} repo(s) not pushed to since they were last read)")
+    files = len(changed)
+    if now_read != last_read:
+        changed[SEEN_PATH] = (json.dumps(now_read, indent=1, sort_keys=True) + "\n").encode()
     if not changed:
         print("Nothing new to archive.")
         return
     what = f"{added} push(es), {added_commits} commit(s)"
     if args.dry_run:
-        print(f"(dry run) would archive {what} across {len(changed)} file(s)")
+        print(f"(dry run) would archive {what} across {files} file(s)")
         return
 
-    sha = commit_files(gh, ORG, args.log_repo, changed,
-                       f"Archive {what} across {len(changed)} repo(s)")
+    message = f"Archive {what} across {files} repo(s)" if files else f"Update {SEEN_PATH}"
+    sha = commit_files(gh, ORG, args.log_repo, changed, message)
     print(f"committed {sha[:8]} to {ORG}/{args.log_repo}: {what}")
 
 
