@@ -7,8 +7,10 @@ import { ctx } from "./state.js";
 import { stateOf } from "./asgpage.js";
 import { classesFromReply, dayOf, measure, perDay, softFor, sparkline } from "./progress.js";
 
-// Contents: read is all it asks for; GitHub adds Metadata: read, which every token has.
-export const STUDENT_PERMISSIONS = { contents: "read" };
+// Contents: read for the repositories, Commit statuses: read for the verdict the
+// deadlines workflow posts; GitHub adds Metadata: read, which every token has.
+export const STUDENT_PERMISSIONS = { contents: "read", statuses: "read" };
+const VERDICT_CONTEXT = "deadline/verdict";   // scripts/deadlines.py, post_verdict
 const GROUP_REPO = /^(g\d+_\d+(?:_\d+)*)-(.+)$/;   // gXX_<numbers>-<assignment>
 
 export const studentTokenUrl = (org) =>
@@ -82,7 +84,20 @@ async function gradedCommit(token, org, r, commits) {
   const hits = acts.filter((a) => a.after === sha && a.activity_type !== "branch_deletion")
     .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
   const first = hits[0];
-  return { sha, at: first ? first.timestamp : null, ref: first?.ref?.replace(/^refs\/heads\//, "") };
+  return { sha, at: first ? first.timestamp : null, ref: first?.ref?.replace(/^refs\/heads\//, ""),
+           verdict: await verdictOf(token, org, r, sha) };
+}
+
+// The deadline report's verdict on the graded commit, which is what's graded: it
+// counts from the push archive, so it can differ from the activity time above
+// (work first pushed elsewhere, say). null before the soft deadline, or with an
+// older key that can't read commit statuses.
+async function verdictOf(token, org, r, sha) {
+  try {
+    const st = await gh(token, "GET", `/repos/${org}/${r.name}/commits/${sha}/status`);
+    const ours = (st.statuses || []).find((s) => s.context === VERDICT_CONTEXT);
+    return ours ? { onTime: ours.state === "success" } : null;
+  } catch { return null; }
 }
 
 // The group's classes, from the bot's reply on its registration issue, which is public.
@@ -115,7 +130,7 @@ export function renderMine(box, data, when, tz = "UTC") {
 
     // Work landing here after the deadline while a later assignment is open is,
     // more often than not, that assignment's work pushed to the wrong place.
-    const next = soft && graded?.at && Date.parse(graded.at) > Date.parse(soft)
+    const next = soft && graded?.at && Date.parse(graded.at) > Date.parse(soft) && !graded.verdict?.onTime
       && data.rows.find((o) => o !== row && Date.parse(o.d.created || o.r.created_at) > Date.parse(d.created || r.created_at)
         && (!o.d.hard_deadline || Date.now() < Date.parse(o.d.hard_deadline)));
     if (next) {
@@ -140,7 +155,8 @@ export function renderMine(box, data, when, tz = "UTC") {
     if (pushed && open && m.quiet >= 2) stat(m.quiet, "days since the last commit");
     // Whether it's late is a question about when the graded work arrived; commit
     // dates are only a fallback, for when GitHub has no record of the push.
-    if (soft && graded?.at) stat(Date.parse(graded.at) <= Date.parse(soft) ? "On time" : "Late", "for your soft deadline");
+    if (soft && graded?.verdict) stat(graded.verdict.onTime ? "On time" : "Late", "for your soft deadline");
+    else if (soft && graded?.at) stat(Date.parse(graded.at) <= Date.parse(soft) ? "On time" : "Late", "for your soft deadline");
     else if (soft) stat(m.late, m.late === 1 ? "commit dated after the soft deadline" : "commits dated after the soft deadline");
     card.append(stats);
 
@@ -164,6 +180,10 @@ export function renderMine(box, data, when, tz = "UTC") {
       dl.append(el("dt", "Your work, as graded"), el("dd", graded.at
         ? `${graded.sha.slice(0, 7)}, the latest commit on ${r.default_branch}, reached GitHub ${when(graded.at)}${graded.ref ? ` (pushed to ${graded.ref})` : ""}`
         : `${graded.sha.slice(0, 7)}, the latest commit on ${r.default_branch}. GitHub has no record of when it was pushed; your teacher checks these by hand.`));
+      if (graded.verdict) {
+        dl.append(el("dt", "Your teachers' record"), el("dd", `Counts it as ${graded.verdict.onTime ? "on time" : "late"} for your soft deadline. `
+          + "That's what is graded, and it can differ from the time above, for work first pushed somewhere else."));
+      }
     }
     card.append(dl);
 

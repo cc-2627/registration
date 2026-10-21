@@ -58,6 +58,10 @@ GRACE = datetime.timedelta(minutes=float(_grace.group(1)) if _grace else 0)
 OPEN_PERMISSION = "push"
 LOCKED_PERMISSION = "pull"
 LATE_CONTEXT = "deadline/soft"
+# The report's soft-deadline verdict, on the commit that gets graded, for the
+# group's own page to show (web/js/student.js): students can't read push-log.
+VERDICT_CONTEXT = "deadline/verdict"
+VERDICTS_PATH = "verdicts.json"   # in push-log: the verdict last posted on each repo
 BOUNDARY_TAG = "refs/tags/soft-deadline"
 
 
@@ -127,6 +131,30 @@ def mark_late_commits(gh, org, repo, soft, branch, first):
     return marked, unknown
 
 
+def post_verdict(gh, org, repo, sha, verdict, soft_by, posted):
+    """Post the report's verdict on the graded commit, once the soft deadline
+    (with its grace) has passed.
+
+    `posted` is what was posted on each repo before, so a repo costs one request
+    when its verdict or graded commit changes and none otherwise. The text says
+    nothing of the grace, which stays a secret: only on time or late.
+    """
+    if verdict not in ("on time", "late") or not soft_by or now() < soft_by:
+        return
+    key = f"{sha}:{verdict}"
+    if posted.get(repo) == key:
+        return
+    ok = verdict == "on time"
+    try:
+        gh.post(f"/repos/{org}/{repo}/statuses/{sha}", {
+            "state": "success" if ok else "failure", "context": VERDICT_CONTEXT,
+            "description": f"Counts as {'on time' if ok else 'late'} for the soft deadline",
+        })
+        posted[repo] = key
+    except GitHubError as e:
+        print(f"  could not post a verdict{'' if IN_ACTIONS else ' on ' + repo}: {e}", file=sys.stderr)
+
+
 def add_note(existing, text):
     return f"{existing}; {text}" if existing else text
 
@@ -140,7 +168,7 @@ def marked_note(existing, marked, unknown):
 
 
 def status(gh, org, group, assignment, soft=None, notes=(), class_="",
-           lock=False, unlock=False, mark=False):
+           lock=False, unlock=False, mark=False, posted=None):
     """Everything we know about one group's repo for one assignment.
 
     `soft` is resolved per group by rules.py, so two groups on the same
@@ -188,6 +216,8 @@ def status(gh, org, group, assignment, soft=None, notes=(), class_="",
             # archive says which. What is graded is still the on-time commit.
             row["note"] = add_note(row["note"], f"pushed again at {row['pushed_at']}, but {branch} "
                                    "still holds the commit received on time - see the push archive")
+        if posted is not None:
+            post_verdict(gh, org, repo, head, row["soft"], soft_by, posted)
         if "unverified" in (row["soft"], row["hard"]):
             row["note"] = add_note(row["note"], f"no server record of when {head[:7]} "
                                    "arrived - check the push archive by hand")
@@ -259,11 +289,13 @@ def private_settings():
     return {"grace_minutes": GRACE.total_seconds() / 60}
 
 
-def publish_reports(gh, tables):
+def publish_reports(gh, tables, posted=None):
     """Write each assignment's full table, and settings.json, to the private
     push-log repo, in one commit, and only what changed: the workflow runs every
     half hour."""
     files = {f"reports/{name}.md": (text + "\n").encode() for name, text in tables.items()}
+    if posted is not None:
+        files[VERDICTS_PATH] = (json.dumps(posted, indent=1, sort_keys=True) + "\n").encode()
     files["settings.json"] = (json.dumps(private_settings(), indent=2) + "\n").encode()
     changed = {path: data for path, data in files.items()
                if get_file(gh, ORG, LOG_REPO, path) != data}
@@ -343,6 +375,9 @@ def main():
         wait_for_deadline(assignments, args.wait)
 
     classes = load_classes()
+    # A report-only run changes nothing in the group repos, verdicts included.
+    posted = (json.loads(get_file(gh, ORG, LOG_REPO, VERDICTS_PATH) or b"{}")
+              if enforcing or args.mark_late else None)
     claims = load_claims(gh, source) if source else {}
 
     sections, all_rows, public = [], [], []
@@ -354,7 +389,8 @@ def main():
                            for n in g["students"]})
             rows.append(status(gh, ORG, g, a, soft=soft, notes=notes,
                                class_=",".join(mine), lock=enforcing,
-                               unlock=bool(args.unlock), mark=args.mark_late))
+                               unlock=bool(args.unlock), mark=args.mark_late,
+                               posted=posted))
         for r in rows:
             r["assignment"] = a["name"]
         all_rows += rows
@@ -382,7 +418,7 @@ def main():
             with open(summary, "a", encoding="utf-8") as f:
                 f.write("\n\n".join(sections) + "\n")
         return
-    where = publish_reports(gh, {a["name"]: t for a, t in zip(assignments, sections)})
+    where = publish_reports(gh, {a["name"]: t for a, t in zip(assignments, sections)}, posted)
     print("\n\n".join(public))
     if summary:
         with open(summary, "a", encoding="utf-8") as f:

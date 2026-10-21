@@ -493,6 +493,17 @@ git log soft-deadline..HEAD        # everything that arrived late
 git diff soft-deadline..HEAD       # what changed after the deadline
 ```
 
+**The group's own verdict.** Separately, once a soft deadline (plus the grace) has passed,
+every enforcing run posts the report's verdict on each group's graded commit, as a
+`deadline/verdict` status: "Counts as on time for the soft deadline" or "…late…". The
+students' page shows it, since they can't read push-log, and it's how a fix made in the
+archive (work first pushed to a personal repo, say) reaches them. `verdicts.json` in
+push-log keeps what was posted on each repo, so a repo costs one request when its verdict
+or graded commit changes and none otherwise. A report-only run posts nothing. Like every
+marker, a student with push access could overwrite it on their own page; the report is
+still what's graded. Their key needs *Commit statuses: read*; an older key without it
+falls back to the page's own reckoning.
+
 **When it runs.** Automatically at the moment a repo is locked by its hard deadline —
 the history is final then, so it is marked once and stays correct. Before that, or for an
 assignment with no hard deadline, run it yourself:
