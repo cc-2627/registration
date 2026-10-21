@@ -345,7 +345,9 @@ log, so a bare `5` would turn every 5 in the run's dates and group numbers into 
 
 It is a secret rather than part of `assignments/`, which is public, so students see
 their deadlines exactly as set and nothing on the course page mentions any slack. Their
-own page still calls work a minute past the deadline late. It only changes the verdicts:
+own page still calls work a minute past the deadline late. The teachers' progress table
+applies it too: each run writes it to `settings.json` in the private push-log repo, which
+the page reads when a teacher signs in. It only changes the verdicts:
 repositories lock at the hard deadline itself. Run the report locally with
 `GRACE_MINUTES=5` to match the workflow. Delete the secret to go back to none.
 

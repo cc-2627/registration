@@ -7,6 +7,7 @@ import { ctx, session } from "./state.js";
 
 const TEAM_RE = /^g\d+_\d+(?:_\d+)*$/;   // ghlib.TEAM_RE: a registered group's team
 let teams = null;                         // the groups, read once per sign-in
+let settings = null;                      // push-log's settings.json, the same
 let kept = null;                          // a save's log, carried into the re-drawn card
 
 function el(tag, text, cls) {
@@ -238,6 +239,17 @@ async function pushLog(org, token, d, group) {
   })).filter((c) => !Number.isNaN(c.at));
 }
 
+// What the deadlines workflow keeps out of the public repo, like the grace period
+// (scripts/deadlines.py, private_settings). Missing until its first run: no grace.
+async function logSettings(org, token) {
+  try {
+    return JSON.parse(textFromB64((await gh(token, "GET", `/repos/${org}/${LOG_REPO}/contents/settings.json`)).content));
+  } catch (e) {
+    if (e.status === 404 || e instanceof SyntaxError) return {};
+    throw e;
+  }
+}
+
 async function fromCommits(org, token, name) {
   try {
     return (await paginate(token, `/repos/${org}/${name}/commits`)).map((c) => ({
@@ -266,6 +278,8 @@ async function loadGroups(d, course, box, when) {
     teams ||= (await paginate(token, `/orgs/${org}/teams`)).filter((t) => TEAM_RE.test(t.name))
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
     if (!teams.length) { box.textContent = "No groups registered yet."; return; }
+    settings ||= await logSettings(org, token);
+    const grace = (Number(settings.grace_minutes) || 0) * 60000;
     let fallback = false;
     const rows = await eachLimited(teams, 6, async (t) => {
       const name = `${t.name}-${d.name}`;
@@ -281,7 +295,7 @@ async function loadGroups(d, course, box, when) {
         if (!commits) { commits = await fromCommits(org, token, name); fallback = true; }
         const soft = softFor(d, classes);
         const m = measure(commits, {
-          since: Date.parse(info.created_at), soft: soft && Date.parse(soft), own: d.own_work, tz,
+          since: Date.parse(info.created_at), soft: soft && Date.parse(soft), own: d.own_work, tz, grace,
           hard: d.hard_deadline && Date.parse(d.hard_deadline),
         });
         const members = t.name.split("_").length - 1;
@@ -299,6 +313,7 @@ async function loadGroups(d, course, box, when) {
     foot.append(fallback
       ? `Some groups aren't in ${LOG_REPO} yet, so their times are their commits' own, which a student's computer sets. `
       : `From ${LOG_REPO}, updated every 30 minutes: times are when GitHub received each push. `,
+      grace ? `"After soft" allows the ${grace / 60000}-minute grace period, like the deadline report. ` : "",
       "Activity isn't progress: one big commit and ten small ones can be the same work, so these are for spotting a group to talk to, not for grading.");
     const csv = el("button", "Download as CSV", "btn small");
     csv.type = "button";
@@ -426,5 +441,5 @@ function download(name, text) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
-export function forgetGroups() { teams = null; }
+export function forgetGroups() { teams = null; settings = null; }
 export function keepLog(name, log) { kept = { name, log }; }

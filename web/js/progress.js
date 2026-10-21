@@ -37,7 +37,8 @@ export function dayOf(ms, tz) {
 // is the server's (a push) rather than the commit's own, which a client can set.
 // since: when the group's repository was made; work from its first minutes is the
 // starting files, unless the group brought its own.
-export function measure(commits, { since, soft, hard, tz, own, now = Date.now() }) {
+// grace: milliseconds after the soft deadline that still count as on time.
+export function measure(commits, { since, soft, hard, tz, own, grace = 0, now = Date.now() }) {
   const work = commits.filter((c) => own || !since || c.at > since + 5 * 60000);
   const days = new Set(work.map((c) => dayOf(c.at, tz)));
   const last = work.length ? Math.max(...work.map((c) => c.at)) : null;
@@ -54,7 +55,7 @@ export function measure(commits, { since, soft, hard, tz, own, now = Date.now() 
     days: days.size,
     last,
     quiet: last ? Math.floor((end - last) / DAY) : null,
-    late: soft ? work.filter((c) => c.at > soft).length : null,
+    late: soft ? work.filter((c) => c.at > soft + grace).length : null,
     rush,
     whos,
     unverified: work.filter((c) => !c.pushed).length,

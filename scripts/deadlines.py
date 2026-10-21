@@ -28,6 +28,7 @@ because the measurement uses the real push time, not the time we locked it.
 import argparse
 import csv
 import datetime
+import json
 import os
 import re
 import sys
@@ -251,14 +252,21 @@ def counts(rows):
             + (f" · {unverified} to check by hand" if unverified else ""))
 
 
+def private_settings():
+    """What the course page needs to agree with the report but students mustn't
+    see. It sits in the private push-log repo, which only teachers can read; add
+    a key here and the page gets it on its next sign-in."""
+    return {"grace_minutes": GRACE.total_seconds() / 60}
+
+
 def publish_reports(gh, tables):
-    """Write each assignment's full table to the private push-log repo, in one
-    commit, and only what changed: the workflow runs every half hour."""
-    changed = {}
-    for name, text in tables.items():
-        path, data = f"reports/{name}.md", (text + "\n").encode()
-        if get_file(gh, ORG, LOG_REPO, path) != data:
-            changed[path] = data
+    """Write each assignment's full table, and settings.json, to the private
+    push-log repo, in one commit, and only what changed: the workflow runs every
+    half hour."""
+    files = {f"reports/{name}.md": (text + "\n").encode() for name, text in tables.items()}
+    files["settings.json"] = (json.dumps(private_settings(), indent=2) + "\n").encode()
+    changed = {path: data for path, data in files.items()
+               if get_file(gh, ORG, LOG_REPO, path) != data}
     if changed:
         commit_files(gh, ORG, LOG_REPO, changed,
                      f"Update deadline report for {', '.join(sorted(tables))}")
