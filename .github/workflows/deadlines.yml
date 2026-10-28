@@ -6,10 +6,10 @@ name: Assignment deadlines
 
 on:
   schedule:
-    # Every 30 min. A run that starts before a hard deadline waits for the exact
-    # moment (--wait below), so the lock is punctual even though GitHub's own
-    # scheduling is not: 5 minutes is its shortest interval and runs are often
-    # delayed under load.
+    # Every 30 min, in theory: in practice GitHub often fires scheduled runs only
+    # every few hours. So a run that starts up to 5 hours before a hard deadline
+    # waits for the exact moment (--wait below), and the lock is punctual anyway.
+    # Runs scheduled meanwhile queue behind it (see concurrency).
     - cron: "7,37 * * * *"
   workflow_dispatch:
     inputs:
@@ -28,7 +28,7 @@ permissions:
 jobs:
   deadlines:
     runs-on: ubuntu-latest
-    timeout-minutes: 90   # a run may sit waiting for a deadline; never longer than this
+    timeout-minutes: 355  # a 300-min wait plus the run itself; GitHub's maximum is 360
     steps:
       - uses: actions/checkout@v4
       # bedel itself, or a copy not yet set up for a course, has no course.json:
@@ -61,7 +61,7 @@ jobs:
       - name: Enforce and report
         if: steps.course.outputs.ready
         run: |
-          python scripts/deadlines.py ${{ inputs.report_only && '--report' || '--wait 35' }}
+          python scripts/deadlines.py ${{ inputs.report_only && '--report' || '--wait 300' }}
         env:
           ORG: ${{ github.repository_owner }}
           REPO: ${{ github.repository }}

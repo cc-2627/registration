@@ -352,14 +352,15 @@ repositories lock at the hard deadline itself. Run the report locally with
 `GRACE_MINUTES=5` to match the workflow. Delete the secret to go back to none.
 
 **Locking to the minute.** GitHub's shortest cron interval is 5 minutes and scheduled runs
-are regularly delayed under load, so no schedule alone can lock punctually. Instead the
-workflow runs every 30 minutes and, when a hard deadline falls within the next 35, the run
-*waits* for the exact moment and locks then (`deadlines.py --wait 35`). So a deadline at
-23:59:00 is enforced at 23:59:05, not at half past midnight.
+are regularly delayed under load (in practice often hours apart), so no schedule alone can
+lock punctually. Instead the workflow is scheduled every 30 minutes and, when a hard deadline
+falls within the next 5 hours, the run *waits* for the exact moment and locks then
+(`deadlines.py --wait 300`). So a deadline at 23:59:00 is enforced at 23:59:05, provided some
+run starts in the 5 hours before it. Runs scheduled meanwhile queue behind the waiting one.
 
 A run that is delayed past the deadline locks immediately on arrival, and the report still
-shows the true lateness either way. The waiting job holds a runner for up to 35 minutes —
-free on a public repo, and `timeout-minutes: 90` stops it ever hanging.
+shows the true lateness either way. The waiting job holds a runner for up to 5 hours —
+free on a public repo, and `timeout-minutes: 355` stops it ever hanging.
 
 ### Classes, and who gets which deadline
 
