@@ -42,6 +42,9 @@ def _next_link(link_header):
     return None
 
 
+RETRY_WAITS = (5, 20, 60)   # seconds before each new try of a failed read
+
+
 class GitHub:
     def __init__(self, token):
         if not token:
@@ -58,12 +61,21 @@ class GitHub:
         req.add_header("User-Agent", "group-registration-bot")
         if body is not None:
             req.add_header("Content-Type", "application/json")
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                raw = resp.read()
-                return (json.loads(raw) if raw else None), resp.headers
-        except urllib.error.HTTPError as e:
-            raise GitHubError(e.code, e.read().decode(errors="replace")) from None
+        # GitHub sometimes fails a request under load ("this diff is temporarily
+        # unavailable"): a read is tried again a few times before the run fails.
+        # Writes are not, since one may have gone through before the error.
+        for wait in (RETRY_WAITS if method == "GET" else ()) + (None,):
+            try:
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    raw = resp.read()
+                    return (json.loads(raw) if raw else None), resp.headers
+            except urllib.error.HTTPError as e:
+                if wait is None or e.code < 500:
+                    raise GitHubError(e.code, e.read().decode(errors="replace")) from None
+            except (urllib.error.URLError, TimeoutError):
+                if wait is None:
+                    raise
+            time.sleep(wait)
 
     def get(self, path):
         return self.request("GET", path)[0]
