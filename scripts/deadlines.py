@@ -61,7 +61,13 @@ LATE_CONTEXT = "deadline/soft"
 # The report's soft-deadline verdict, on the commit that gets graded, for the
 # group's own page to show (web/js/student.js): students can't read push-log.
 VERDICT_CONTEXT = "deadline/verdict"
-VERDICTS_PATH = "verdicts.json"   # in push-log: the verdict last posted on each repo
+VERDICT_TEXT = "Counts as {} for the soft deadline"   # web/js/student.js reads only these
+# What was last done to each repo from the deadlines, kept in push-log so the next run
+# can tell when a deadline changed: then it redoes that work, and otherwise skips it.
+RECORDS = {
+    "verdicts": "verdicts.json",   # repo -> "sha:verdict" posted on the graded commit
+    "marks": "marks.json",         # repo -> the soft deadline its commits were marked against
+}
 BOUNDARY_TAG = "refs/tags/soft-deadline"
 
 
@@ -84,9 +90,12 @@ def mark_late_commits(gh, org, repo, soft, branch, first):
     server record are left alone and counted. This marks up the history, it does
     not decide who was late.
 
+    Run again after the soft deadline changed, it corrects both: marks that no
+    longer hold are overridden, and the tag moves (or goes, with no soft deadline).
+
     Returns (marked, unknown).
     """
-    if not soft or not branch:
+    if not branch:
         return 0, 0
     try:
         history = gh.paginate(f"/repos/{org}/{repo}/commits?sha={branch}")
@@ -102,17 +111,19 @@ def mark_late_commits(gh, org, repo, soft, branch, first):
         if when is None:
             unknown += 1
             continue
-        if when <= soft:
+        late = bool(soft) and when > soft
+        if soft and not late:
             boundary = boundary or c["sha"]
         try:
             current = gh.get(f"/repos/{org}/{repo}/commits/{c['sha']}/status")
             # Statuses come newest first; the first one in our context is in force.
             ours = next((st for st in (current or {}).get("statuses", [])
                          if st.get("context") == LATE_CONTEXT), None)
-            if when > soft and not (ours and ours.get("state") == "failure"):
+            if late and not (ours and ours.get("state") == "failure"):
                 state, text = "failure", "Reached GitHub after the soft deadline - counts as late"
-            elif when <= soft and ours and ours.get("state") == "failure":
-                state, text = "success", "Reached GitHub before the soft deadline"
+            elif not late and ours and ours.get("state") == "failure":
+                state, text = "success", ("Reached GitHub before the soft deadline" if soft
+                                          else "No soft deadline for this assignment")
             else:
                 continue
             gh.post(f"/repos/{org}/{repo}/statuses/{c['sha']}", {
@@ -124,35 +135,56 @@ def mark_late_commits(gh, org, repo, soft, branch, first):
             print(f"  could not mark {c['sha'][:7]} in {repo}: {e}", file=sys.stderr)
 
     try:
-        if boundary and not gh.exists(f"/repos/{org}/{repo}/git/{BOUNDARY_TAG}"):
+        tag = f"/repos/{org}/{repo}/git/{BOUNDARY_TAG}"
+        there = gh.exists(tag)
+        if boundary and there:
+            gh.patch(tag, {"sha": boundary, "force": True})
+        elif boundary:
             gh.post(f"/repos/{org}/{repo}/git/refs", {"ref": BOUNDARY_TAG, "sha": boundary})
+        elif there:
+            gh.delete(tag)
     except GitHubError:
         pass
     return marked, unknown
 
 
 def post_verdict(gh, org, repo, sha, verdict, soft_by, posted):
-    """Post the report's verdict on the graded commit, once the soft deadline
-    (with its grace) has passed.
+    """Keep the report's verdict on the graded commit in step with the deadlines.
+
+    A verdict shows once the soft deadline (with its grace) has passed. Every run
+    works it out again from the current deadlines, so one that moves or goes away
+    corrects what was posted: GitHub cannot delete a status, so a stale verdict is
+    overridden by one that gives none.
 
     `posted` is what was posted on each repo before, so a repo costs one request
     when its verdict or graded commit changes and none otherwise. The text says
     nothing of the grace, which stays a secret: only on time or late.
     """
-    if verdict not in ("on time", "late") or not soft_by or now() < soft_by:
+    decided = verdict in ("on time", "late") and soft_by and now() >= soft_by
+    key = f"{sha}:{verdict}" if decided else None
+    old = posted.get(repo)
+    if old == key:
         return
-    key = f"{sha}:{verdict}"
-    if posted.get(repo) == key:
-        return
-    ok = verdict == "on time"
+    if key:
+        target, state = sha, "success" if verdict == "on time" else "failure"
+        text = VERDICT_TEXT.format(verdict)
+    else:
+        target, state = old.split(":")[0], "success"
+        text = "No soft deadline for this assignment" if not soft_by else "No soft-deadline verdict yet"
     try:
-        gh.post(f"/repos/{org}/{repo}/statuses/{sha}", {
-            "state": "success" if ok else "failure", "context": VERDICT_CONTEXT,
-            "description": f"Counts as {'on time' if ok else 'late'} for the soft deadline",
-        })
-        posted[repo] = key
+        gh.post(f"/repos/{org}/{repo}/statuses/{target}",
+                {"state": state, "context": VERDICT_CONTEXT, "description": text})
+        if key:
+            posted[repo] = key
+        else:
+            del posted[repo]
     except GitHubError as e:
         print(f"  could not post a verdict{'' if IN_ACTIONS else ' on ' + repo}: {e}", file=sys.stderr)
+
+
+def stamp(soft):
+    """How marks.json records the soft deadline a repo was marked against."""
+    return soft.isoformat() if soft else "none"
 
 
 def add_note(existing, text):
@@ -168,12 +200,13 @@ def marked_note(existing, marked, unknown):
 
 
 def status(gh, org, group, assignment, soft=None, notes=(), class_="",
-           lock=False, unlock=False, mark=False, posted=None):
+           lock=False, unlock=False, mark=False, records=None):
     """Everything we know about one group's repo for one assignment.
 
     `soft` is resolved per group by rules.py, so two groups on the same
     assignment can legitimately have different ones. The hard deadline is the
-    assignment's and is the same for everybody.
+    assignment's and is the same for everybody. `records` (see RECORDS) is None
+    on a run that must not change the group repos.
     """
     name = assignment["name"]
     repo = repo_name(group["name"], name)
@@ -216,8 +249,8 @@ def status(gh, org, group, assignment, soft=None, notes=(), class_="",
             # archive says which. What is graded is still the on-time commit.
             row["note"] = add_note(row["note"], f"pushed again at {row['pushed_at']}, but {branch} "
                                    "still holds the commit received on time - see the push archive")
-        if posted is not None:
-            post_verdict(gh, org, repo, head, row["soft"], soft_by, posted)
+        if records is not None:
+            post_verdict(gh, org, repo, head, row["soft"], soft_by, records["verdicts"])
         if "unverified" in (row["soft"], row["hard"]):
             row["note"] = add_note(row["note"], f"no server record of when {head[:7]} "
                                    "arrived - check the push archive by hand")
@@ -242,12 +275,24 @@ def status(gh, org, group, assignment, soft=None, notes=(), class_="",
         grant_team(gh, org, group["slug"], repo, permission=LOCKED_PERMISSION)
         row["state"] = "read-only"
         row["note"] = add_note(row["note"], "locked now")
-        # The history is final the moment it is locked, so mark it once, here.
+        # The history is final the moment it is locked, so mark it here, once,
+        # unless the soft deadline changes later (below).
+        if soft:
+            row["note"] = marked_note(row["note"], *mark_late_commits(gh, org, repo, soft_by, branch, first))
+        if records is not None:
+            records["marks"][repo] = stamp(soft_by)
+    elif lock and records is not None and permission == LOCKED_PERMISSION \
+            and records["marks"].setdefault(repo, stamp(soft_by)) != stamp(soft_by):
+        # Marked against a soft deadline that has since changed: mark again.
+        row["note"] = add_note(row["note"], "soft deadline changed, commits marked again")
         row["note"] = marked_note(row["note"], *mark_late_commits(gh, org, repo, soft_by, branch, first))
+        records["marks"][repo] = stamp(soft_by)
     elif mark and soft and head:
         # Every group, not just the late ones: an on-time group may carry marks an
         # earlier version set from commit dates, and this is what corrects them.
         row["note"] = marked_note(row["note"], *mark_late_commits(gh, org, repo, soft_by, branch, first))
+        if records is not None:
+            records["marks"][repo] = stamp(soft_by)
     return row
 
 
@@ -289,13 +334,13 @@ def private_settings():
     return {"grace_minutes": GRACE.total_seconds() / 60}
 
 
-def publish_reports(gh, tables, posted=None):
+def publish_reports(gh, tables, records=None):
     """Write each assignment's full table, and settings.json, to the private
     push-log repo, in one commit, and only what changed: the workflow runs every
     half hour."""
     files = {f"reports/{name}.md": (text + "\n").encode() for name, text in tables.items()}
-    if posted is not None:
-        files[VERDICTS_PATH] = (json.dumps(posted, indent=1, sort_keys=True) + "\n").encode()
+    for name, path in RECORDS.items() if records is not None else ():
+        files[path] = (json.dumps(records[name], indent=1, sort_keys=True) + "\n").encode()
     files["settings.json"] = (json.dumps(private_settings(), indent=2) + "\n").encode()
     changed = {path: data for path, data in files.items()
                if get_file(gh, ORG, LOG_REPO, path) != data}
@@ -376,8 +421,9 @@ def main():
 
     classes = load_classes()
     # A report-only run changes nothing in the group repos, verdicts included.
-    posted = (json.loads(get_file(gh, ORG, LOG_REPO, VERDICTS_PATH) or b"{}")
-              if enforcing or args.mark_late else None)
+    records = ({name: json.loads(get_file(gh, ORG, LOG_REPO, path) or b"{}")
+                for name, path in RECORDS.items()}
+               if enforcing or args.mark_late else None)
     claims = load_claims(gh, source) if source else {}
 
     sections, all_rows, public = [], [], []
@@ -390,7 +436,7 @@ def main():
             rows.append(status(gh, ORG, g, a, soft=soft, notes=notes,
                                class_=",".join(mine), lock=enforcing,
                                unlock=bool(args.unlock), mark=args.mark_late,
-                               posted=posted))
+                               records=records))
         for r in rows:
             r["assignment"] = a["name"]
         all_rows += rows
@@ -418,7 +464,7 @@ def main():
             with open(summary, "a", encoding="utf-8") as f:
                 f.write("\n\n".join(sections) + "\n")
         return
-    where = publish_reports(gh, {a["name"]: t for a, t in zip(assignments, sections)}, posted)
+    where = publish_reports(gh, {a["name"]: t for a, t in zip(assignments, sections)}, records)
     print("\n\n".join(public))
     if summary:
         with open(summary, "a", encoding="utf-8") as f:

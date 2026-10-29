@@ -505,6 +505,15 @@ marker, a student with push access could overwrite it on their own page; the rep
 still what's graded. Their key needs *Commit statuses: read*; an older key without it
 falls back to the page's own reckoning.
 
+**Changing a deadline afterwards.** Verdicts and late marks are worked out again on every
+enforcing run from the current deadlines, and the workflow also runs whenever
+`assignments/` changes. A verdict that no longer holds is replaced (GitHub can't delete a
+status: if the soft deadline went away or moved later, the new one says there is no verdict).
+`marks.json` in push-log records the soft deadline each locked repo was marked against;
+when that changes, its commits are marked again and the `soft-deadline` tag moves, or
+goes if there's no soft deadline any more. A soft deadline set to *none* means none: the
+classes' defaults from the soft week no longer apply.
+
 **When it runs.** Automatically at the moment a repo is locked by its hard deadline —
 the history is final then, so it is marked once and stays correct. Before that, or for an
 assignment with no hard deadline, run it yourself:

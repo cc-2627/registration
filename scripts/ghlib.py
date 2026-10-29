@@ -445,6 +445,9 @@ def resolve_soft(rules, assignment, group, classes, claims=None):
     their class on the faculty's platform. The disagreement is recorded instead
     of being resolved silently.
     """
+    if assignment.get("soft_manual") and not assignment.get("soft_deadline"):
+        # Set by hand to none: no soft deadline at all, not the classes' defaults.
+        return None, []
     claims = claims or {}
     mine = {}
     for n in group.get("students", ()):

@@ -91,12 +91,13 @@ async function gradedCommit(token, org, r, commits) {
 // The deadline report's verdict on the graded commit, which is what's graded: it
 // counts from the push archive, so it can differ from the activity time above
 // (work first pushed elsewhere, say). null before the soft deadline, or with an
-// older key that can't read commit statuses.
+// older key that can't read commit statuses, or with no soft deadline at all.
 async function verdictOf(token, org, r, sha) {
   try {
     const st = await gh(token, "GET", `/repos/${org}/${r.name}/commits/${sha}/status`);
     const ours = (st.statuses || []).find((s) => s.context === VERDICT_CONTEXT);
-    return ours ? { onTime: ours.state === "success" } : null;
+    // A deadline that moved or went away leaves a status that gives no verdict.
+    return ours?.description?.startsWith("Counts as") ? { onTime: ours.state === "success" } : null;
   } catch { return null; }
 }
 

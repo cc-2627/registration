@@ -11,6 +11,10 @@ on:
     # waits for the exact moment (--wait below), and the lock is punctual anyway.
     # Runs scheduled meanwhile queue behind it (see concurrency).
     - cron: "7,37 * * * *"
+  # A changed deadline is applied straight away: verdicts and late marks follow it.
+  push:
+    branches: [main]
+    paths: ["assignments/**"]
   workflow_dispatch:
     inputs:
       report_only:
