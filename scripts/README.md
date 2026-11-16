@@ -641,13 +641,17 @@ cannot reach. It is what the report grades on.
 
 ### Renaming an assignment
 
+On the site, an assignment's card has **Rename**, which runs the *Rename an assignment*
+workflow (`.github/workflows/rename.yml`). From a checkout, it's the same script:
+
 ```
 GH_TOKEN=$(gh auth token) python scripts/rename_assignment.py project_1 project1_part1          # says what it would do
 GH_TOKEN=$(gh auth token) python scripts/rename_assignment.py project_1 project1_part1 --yes    # does it
 ```
 
 Every group's `<group>-project_1` becomes `<group>-project1_part1`, the push archive
-follows, and `assignments/project_1.json` becomes `assignments/project1_part1.json`.
+follows (`pushes/`, the report, and the per-repository records in `last-read.json`,
+`verdicts.json` and `marks.json`), and `assignments/project_1.json` becomes `assignments/project1_part1.json`.
 Students don't have to do anything. GitHub redirects a renamed repository's old name for
 the web, the API and git, so their clones keep pushing and pulling through the old URL.
 The only difference they see is the new name, plus a two-line note from GitHub on each

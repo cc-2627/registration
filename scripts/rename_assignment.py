@@ -17,7 +17,8 @@ to reuse it.
 In order, so that a run that stops halfway leaves nothing a re-run can't finish:
   1. each group's <group>-OLD repository becomes <group>-NEW (and OLD-template,
      if the assignment uses the default template name);
-  2. the push archive's pushes/OLD/ moves to pushes/NEW/, in one commit;
+  2. the push archive's pushes/OLD/ moves to pushes/NEW/, with its report and
+     the records the deadlines and the archive keep per repository, in one commit;
   3. assignments/OLD.json becomes assignments/NEW.json, in one commit.
 
 Commit history, issues, commit statuses, tags, team access and locks all belong
@@ -29,8 +30,13 @@ import json
 import os
 import sys
 
+from deadlines import RECORDS
 from ghlib import (ASSIGNMENT_RE, GitHub, GitHubError, commit_files, default_org,
                    get_file, load_assignments, load_groups, repo_name)
+from pushlog import SEEN_PATH
+
+# push-log's records keyed by repository name, so <group>-OLD becomes <group>-NEW.
+KEYED = (SEEN_PATH, *RECORDS.values())
 
 
 def exists(gh, org, repo):
@@ -60,8 +66,23 @@ def rename_repo(gh, org, old, new, apply):
     return "renamed"
 
 
+def rekey(text, old, new):
+    """A {<group>-OLD: ...} record with its keys renamed to <group>-NEW, or None
+    if it has none of OLD's (or isn't a record at all)."""
+    try:
+        data = json.loads(text or b"{}")
+    except ValueError:
+        return None
+    if not isinstance(data, dict) or not any(k.endswith(f"-{old}") for k in data):
+        return None
+    data = {k[:-len(old)] + new if k.endswith(f"-{old}") else k: v for k, v in data.items()}
+    return (json.dumps(data, indent=1, sort_keys=True) + "\n").encode()
+
+
 def move_archive(gh, org, log_repo, old, new, apply):
-    """Move pushes/OLD/*.csv to pushes/NEW/ in one commit. Returns how many files."""
+    """Move everything the push archive keeps under OLD's name to NEW's, in one
+    commit: pushes/OLD/*.csv, reports/OLD.md, and the records keyed by repo
+    (KEYED). Returns how many files that touches."""
     try:
         info = gh.get(f"/repos/{org}/{log_repo}")
         tree = gh.get(f"/repos/{org}/{log_repo}/git/trees/"
@@ -70,14 +91,18 @@ def move_archive(gh, org, log_repo, old, new, apply):
         if e.status in (404, 409):
             return 0
         raise
-    paths = [t["path"] for t in tree.get("tree") or []
-             if t["type"] == "blob" and t["path"].startswith(f"pushes/{old}/")]
-    if paths and apply:
-        files = {f"pushes/{new}/{p[len(f'pushes/{old}/'):]}": get_file(gh, org, log_repo, p)
-                 for p in paths}
+    blobs = {t["path"] for t in tree.get("tree") or [] if t["type"] == "blob"}
+    moves = {p: f"pushes/{new}/{p[len(f'pushes/{old}/'):]}"
+             for p in blobs if p.startswith(f"pushes/{old}/")}
+    if f"reports/{old}.md" in blobs:
+        moves[f"reports/{old}.md"] = f"reports/{new}.md"
+    files = {p: rekey(get_file(gh, org, log_repo, p), old, new) for p in KEYED if p in blobs}
+    files = {p: b for p, b in files.items() if b is not None}
+    if (moves or files) and apply:
+        files.update({to: get_file(gh, org, log_repo, p) for p, to in moves.items()})
         commit_files(gh, org, log_repo, files,
-                     f"Rename {old} to {new}: move its push archive", delete=paths)
-    return len(paths)
+                     f"Rename {old} to {new}: move its push archive", delete=list(moves))
+    return len(moves) + len(files)
 
 
 def move_definition(gh, org, repo, definition, old, new, apply):
@@ -148,7 +173,7 @@ def main():
 
     n = move_archive(gh, org, args.log_repo, args.old, args.new, args.yes)
     print(f"  push archive: {n} file(s) {'moved' if args.yes else 'to move'} "
-          f"from pushes/{args.old}/ to pushes/{args.new}/")
+          f"from {args.old} to {args.new}")
 
     if definition["name"] == args.old:
         move_definition(gh, org, args.repo, definition, args.old, args.new, args.yes)

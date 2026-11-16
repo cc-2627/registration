@@ -10,6 +10,13 @@ let teams = null;                         // the groups, read once per sign-in
 let settings = null;                      // push-log's settings.json, the same
 let kept = null;                          // a save's log, carried into the re-drawn card
 
+// What a teacher can do to an assignment from its card: a button that opens a form.
+// A new action is one entry here.
+const PANELS = [
+  { id: "deadlines", label: "Edit deadlines", form: (d, course) => editForm(d, course) },
+  { id: "rename", label: "Rename", form: (d) => renameForm(d) },
+];
+
 function el(tag, text, cls) {
   const e = document.createElement(tag);
   if (text !== undefined) e.textContent = text;
@@ -73,17 +80,24 @@ function card(d, course, when) {
   if (!ctx.login) return box;
 
   const actions = el("div", undefined, "row");
-  const edit = el("button", "Edit deadlines", "btn small");
-  edit.type = "button";
-  actions.append(edit);
   box.append(actions);
-  const form = editForm(d, course);
-  form.hidden = true;
-  box.append(form);
-  edit.onclick = () => { form.hidden = !form.hidden; edit.textContent = form.hidden ? "Edit deadlines" : "Close"; };
-  if (kept?.name === d.name) {   // just saved: stay open, with the save's log
-    form.querySelector("ol.log").replaceWith(kept.log);
-    edit.click();
+  const open = [];
+  for (const p of PANELS) {
+    const button = el("button", p.label, "btn small");
+    button.type = "button";
+    actions.append(button);
+    const form = p.form(d, course);
+    form.hidden = true;
+    box.append(form);
+    open.push([p, button, form]);
+    button.onclick = () => {   // one panel open at a time
+      const show = form.hidden;
+      for (const [q, b, f] of open) { f.hidden = !(show && f === form); b.textContent = f.hidden ? q.label : "Close"; }
+    };
+    if (kept?.name === d.name && kept.panel === p.id) {   // just saved: stay open, with the save's log
+      form.querySelector("ol.log").replaceWith(kept.log);
+      button.click();
+    }
   }
 
   const groups = el("details", undefined, "groups");
@@ -157,13 +171,72 @@ function editForm(d, course) {
       else inputs.hard = hard.value.replace("T", " ");
       await saveDeadlines(logger(log.id), inputs);
       // The page reads the new dates back; the log stays, in a card re-drawn around it.
-      document.dispatchEvent(new CustomEvent("assignments-changed", { detail: { name: d.name, log } }));
+      changed(d.name, "deadlines", log);
     } catch (e) {
-      const li = el("li", e.message, "bad");
-      log.append(li);
+      failed(log, e);
     } finally {
-      for (const li of log.querySelectorAll("li.run")) li.className = "warn";
+      settle(log);
       save.disabled = false;
+    }
+  };
+  return form;
+}
+
+function changed(name, panel, log) {
+  document.dispatchEvent(new CustomEvent("assignments-changed", { detail: { name, panel, log } }));
+}
+function failed(log, e) { log.append(el("li", e.message, "bad")); }
+function settle(log) { for (const li of log.querySelectorAll("li.run")) li.className = "warn"; }
+
+// Runs one of the registration repo's workflows and waits for it to finish.
+async function runWorkflow(log, workflow, inputs, doing, done) {
+  const { org, repo, token } = ctx;
+  const s = log(doing);
+  const since = Date.now() - 10000;
+  await gh(token, "POST", `/repos/${org}/${repo}/actions/workflows/${workflow}/dispatches`,
+    { ref: session.branch, inputs });
+  const run = await waitForRun(token, org, repo, workflow,
+    (r) => r.event === "workflow_dispatch" && Date.parse(r.created_at) >= since,
+    (u) => s(`${doing}: ${u}`, "run"), 10);
+  if (run.conclusion !== "success") throw new Error(`${doing}: ${run.conclusion}. What went wrong is in its log: ${run.html_url}`);
+  s(done, "ok", [{ label: "Log ↗", href: run.html_url }]);
+  return run;
+}
+
+// ---------- renaming ----------
+const NAME_RE = /^[a-z0-9][a-z0-9_-]*$/;   // ghlib.ASSIGNMENT_RE
+
+function renameForm(d) {
+  const form = el("div", undefined, "edit");
+  const name = input("text", d.name);
+  name.spellcheck = false;
+  name.autocomplete = "off";
+  const r = el("div", undefined, "row");
+  r.append(field("New name", name));
+  const note = el("p", `Every group's ${ctx.org}/<group>-${d.name} repository becomes <group>-<new name>, `
+    + "with its history, issues, locks and the push archive. Students don't have to do anything: "
+    + "GitHub redirects the old name, so their clones keep pushing and pulling. Nobody is emailed.", "hint");
+  const go = el("button", "Rename", "btn primary");
+  go.type = "button";
+  const log = el("ol", undefined, "log");
+  log.id = `rename-${d.name}-log`;
+  form.append(r, note, go, log);
+
+  go.onclick = async () => {
+    go.disabled = true;
+    try {
+      const to = name.value.trim();
+      if (to === d.name) throw new Error("That is already its name.");
+      if (!NAME_RE.test(to)) throw new Error("Use lowercase letters, digits, - and _, starting with a letter or digit.");
+      await runWorkflow(logger(log.id), "rename.yml", { old: d.name, new: to, dry_run: "false" },
+        `Renaming ${d.name} to ${to}`, `${d.name} is now ${to}`);
+      forgetGroups();
+      changed(to, "rename", log);
+    } catch (e) {
+      failed(log, e);
+    } finally {
+      settle(log);
+      go.disabled = false;
     }
   };
   return form;
@@ -174,15 +247,7 @@ function editForm(d, course) {
 // deadlines run, so locks follow the new dates now rather than within 30 minutes.
 async function saveDeadlines(log, inputs) {
   const { org, repo, token } = ctx;
-  const s = log(`Saving ${inputs.name}'s deadlines`);
-  const since = Date.now() - 10000;
-  await gh(token, "POST", `/repos/${org}/${repo}/actions/workflows/assignment.yml/dispatches`,
-    { ref: session.branch, inputs });
-  const run = await waitForRun(token, org, repo, "assignment.yml",
-    (r) => r.event === "workflow_dispatch" && Date.parse(r.created_at) >= since,
-    (u) => s(`Saving the deadlines: ${u}`, "run"), 10);
-  if (run.conclusion !== "success") throw new Error(`Saving ${run.conclusion}. What went wrong is in its log: ${run.html_url}`);
-  s(`${inputs.name}'s deadlines saved`, "ok", [{ label: "Log ↗", href: run.html_url }]);
+  await runWorkflow(log, "assignment.yml", inputs, `Saving ${inputs.name}'s deadlines`, `${inputs.name}'s deadlines saved`);
 
   const l = log("Locking or opening repositories to match");
   const after = Date.now() - 10000;
@@ -442,4 +507,4 @@ function download(name, text) {
 }
 
 export function forgetGroups() { teams = null; settings = null; }
-export function keepLog(name, log) { kept = { name, log }; }
+export function keepLog(name, panel, log) { kept = { name, panel, log }; }

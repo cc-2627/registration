@@ -364,7 +364,7 @@ $("courseToken").addEventListener("keydown", (e) => { if (e.key === "Enter") sig
 $("courseDays").addEventListener("input", refreshLinks);
 $("botDays").addEventListener("input", refreshLinks);
 for (const b of document.querySelectorAll("[data-tab]")) b.onclick = () => showTab(b.dataset.tab);
-document.addEventListener("assignments-changed", (e) => { keepLog(e.detail.name, e.detail.log); refresh(); });
+document.addEventListener("assignments-changed", (e) => { keepLog(e.detail.name, e.detail.panel, e.detail.log); refresh(); });
 window.addEventListener("hashchange", () => { showView(); if (location.hash === "#assignments") scrollTo(0, 0); });
 showView();
 runButton("runRelease", "releaseLog", async () => { await release(); await refresh(); });

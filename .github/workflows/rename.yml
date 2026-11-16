@@ -1,0 +1,56 @@
+name: Rename an assignment
+
+# What scripts/rename_assignment.py does from a laptop, from GitHub instead: run it
+# from the Actions tab (Run workflow) or an assignment's card on the bedel site.
+# Every group's repository, the push archive and assignments/<name>.json take the
+# new name. Students' clones keep working through GitHub's redirect; nobody is
+# emailed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      old:
+        description: "The assignment's current name"
+        required: true
+        type: string
+      new:
+        description: "Its new name (lowercase letters, digits, - and _)"
+        required: true
+        type: string
+      dry_run:
+        description: "Only show what would happen"
+        required: false
+        type: boolean
+        default: false
+
+# Shares the registration workflow's queue, so a group registering mid-rename
+# can't get a repository under the old name.
+concurrency:
+  group: registration
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  rename:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The inputs reach the script through the environment, never pasted into
+      # the shell, so nothing typed into the form is ever run as a command.
+      - name: Rename
+        env:
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
+          ORG: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
+          OLD: ${{ inputs.old }}
+          NEW: ${{ inputs.new }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=("$OLD" "$NEW" --repo "${REPO#*/}")
+          if [ "$DRY_RUN" != "true" ]; then args+=(--yes); fi
+          python scripts/rename_assignment.py "${args[@]}"
