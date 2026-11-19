@@ -100,9 +100,12 @@ class GitHub:
         return (out or {}).get("data")
 
     def exists(self, path):
+        """Whether `path` answers. A repository's former name still answers, through
+        the redirect left by a rename, but names a different one: that one doesn't exist."""
         try:
-            self.get(path)
-            return True
+            got = self.get(path)
+            repo = re.fullmatch(r"/repos/[^/]+/([^/]+)", path)
+            return not repo or (got or {}).get("name", "").lower() == repo[1].lower()
         except GitHubError as e:
             if e.status == 404:
                 return False
