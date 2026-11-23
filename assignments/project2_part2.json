@@ -5,7 +5,7 @@
   "soft_time": null,
   "soft_manual": true,
   "soft_by_class": {},
-  "soft_deadline": "2026-11-26T23:59:00+00:00",
+  "soft_deadline": null,
   "hard_deadline": "2026-12-07T23:59:00+00:00",
   "created": "2026-11-19T12:06:32+00:00",
   "own_work": true
